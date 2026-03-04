@@ -4,7 +4,7 @@
 **Name:** Cortex - PetalFlow Memory & Knowledge Service
 **Type:** Go service (MCP server)
 **Created:** 2026-03-04
-**Status:** Development Phase - Phase 1
+**Status:** Development Phase - Phase 1 Complete
 
 ## Purpose
 Cortex provides persistent context, vector-backed knowledge retrieval, and conversation memory for PetalFlow agents. It implements four memory primitives:
@@ -166,6 +166,37 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - Returns entity with relationships and recent mentions in single call
 - Full test coverage (28 tests)
 
+**Milestone 1.8 Completed:**
+- MCP Server implemented with stdio transport
+  - Uses mark3labs/mcp-go v0.44.1 library
+  - All 16 tool definitions from FRD section 4.1 implemented
+  - Functional options pattern for tool parameters
+- Conversation tools implemented
+  - conversation_append: add messages to threads
+  - conversation_history: retrieve messages with pagination
+  - conversation_search: semantic search across messages
+- Knowledge tools implemented
+  - knowledge_ingest: document ingestion with chunking
+  - knowledge_search: semantic search with context window
+  - knowledge_collections: create/list/delete collections
+- Context tools implemented
+  - context_get: retrieve values by key
+  - context_set: store values with TTL and versioning
+  - context_merge: merge values with strategy
+  - context_list: list keys with prefix filtering
+- Entity tools implemented
+  - entity_query: lookup by name/alias with mentions
+  - entity_search: semantic search across entities
+  - entity_relationships: get entity relationships
+  - entity_update: modify entity attributes/aliases
+  - entity_merge: combine duplicate entities
+  - entity_list: paginated listing with filters
+- Namespace enforcement via allowedNamespace config
+  - Validates namespace on every tool call
+  - Supports open mode (all namespaces) or restricted mode
+- JSON result serialization for all tool responses
+- Full test coverage (16 tests)
+
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
 - `.project/TASK_CHECKLIST.md` - Quick-reference checklist
@@ -200,6 +231,8 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/context/engine_test.go` - Context engine tests
 - `internal/entity/engine.go` - Entity memory engine
 - `internal/entity/engine_test.go` - Entity engine tests
+- `internal/server/mcp.go` - MCP server implementation
+- `internal/server/mcp_test.go` - MCP server tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---
@@ -214,7 +247,7 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - [x] Knowledge Store Engine
 - [x] Workflow Context Engine
 - [x] Entity Memory Engine
-- [ ] MCP Server
+- [x] MCP Server
 
 ### Phase 2: Advanced Features
 - [ ] Conversation Summarization

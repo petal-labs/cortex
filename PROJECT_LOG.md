@@ -77,6 +77,21 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - Support for TopK, MinScore filtering, and type-specific filters
 - Full test coverage added for vector search functionality
 
+**Milestone 1.3 Completed:**
+- Embedding provider interface defined
+  - Provider interface with Embed() and EmbedBatch() methods
+  - EmbeddingRequest/Response types for Iris API contract
+- Iris embedding client implemented
+  - HTTP client for Iris /embeddings endpoint
+  - Batch support with configurable size limits
+  - Handles empty inputs and error responses
+- LRU embedding cache implemented
+  - CachedProvider wraps any Provider with caching
+  - SHA-256 text hashing for cache keys
+  - Cache immutability to prevent mutation issues
+  - Stats and clear operations for monitoring
+- Full test coverage with mock server tests
+
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
 - `.project/TASK_CHECKLIST.md` - Quick-reference checklist
@@ -97,6 +112,10 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/storage/sqlite/entity.go` - Entity storage ops
 - `internal/storage/sqlite/entity_test.go` - Entity tests
 - `internal/storage/sqlite/vector_search_test.go` - Vector search tests
+- `internal/embedding/provider.go` - Embedding provider interface
+- `internal/embedding/iris.go` - Iris HTTP client implementation
+- `internal/embedding/cache.go` - LRU embedding cache
+- `internal/embedding/provider_test.go` - Embedding tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---

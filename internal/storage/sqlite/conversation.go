@@ -304,14 +304,12 @@ func (b *Backend) DeleteThread(ctx context.Context, namespace, threadID string) 
 }
 
 // StoreMessageEmbedding stores the embedding for a message.
+// Embeddings are stored in binary format for use with sqlite-vec.
 func (b *Backend) StoreMessageEmbedding(ctx context.Context, messageID string, embedding []float32) error {
-	// Convert float32 slice to bytes
-	embeddingBytes, err := encodeEmbedding(embedding)
-	if err != nil {
-		return fmt.Errorf("failed to encode embedding: %w", err)
-	}
+	// Encode embedding as binary for sqlite-vec compatibility
+	embeddingBytes := encodeVectorBinary(embedding)
 
-	_, err = b.db.ExecContext(ctx, `
+	_, err := b.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO message_embeddings (message_id, embedding)
 		VALUES (?, ?)
 	`, messageID, embeddingBytes)
@@ -339,23 +337,85 @@ func (b *Backend) MarkMessagesSummarized(ctx context.Context, namespace, threadI
 }
 
 // SearchMessages performs semantic search across messages in a namespace.
-// Note: This is a placeholder - actual vector search will be implemented with vec0.
+// Uses sqlite-vec's vec_distance_cosine for brute-force KNN search.
 func (b *Backend) SearchMessages(ctx context.Context, namespace string, embedding []float32, opts storage.MessageSearchOpts) ([]*types.MessageResult, error) {
-	// This will be implemented when vec0 integration is added
-	// For now, return an empty result
-	return []*types.MessageResult{}, nil
+	if opts.TopK <= 0 {
+		opts.TopK = 10
+	}
+
+	// Encode query embedding as binary for sqlite-vec
+	queryEmbedding := encodeVectorBinary(embedding)
+
+	// Build the query
+	var args []any
+	query := `
+		SELECT m.id, m.namespace, m.thread_id, m.role, m.content, m.metadata,
+		       m.summarized, m.created_at,
+		       vec_distance_cosine(e.embedding, ?) AS distance
+		FROM message_embeddings e
+		JOIN messages m ON m.id = e.message_id
+		WHERE m.namespace = ?
+	`
+	args = append(args, queryEmbedding, namespace)
+
+	// Optional: filter by thread
+	if opts.ThreadID != nil {
+		query += " AND m.thread_id = ?"
+		args = append(args, *opts.ThreadID)
+	}
+
+	query += " ORDER BY distance ASC LIMIT ?"
+	args = append(args, opts.TopK)
+
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search messages: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*types.MessageResult
+	for rows.Next() {
+		msg := &types.Message{}
+		var metadataJSON sql.NullString
+		var createdAtUnix int64
+		var distance float64
+
+		if err := rows.Scan(
+			&msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content,
+			&metadataJSON, &msg.Summarized, &createdAtUnix, &distance,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %w", err)
+		}
+
+		msg.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
+
+		if metadataJSON.Valid && metadataJSON.String != "" {
+			if err := json.Unmarshal([]byte(metadataJSON.String), &msg.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+
+		// Convert distance to similarity score (cosine distance -> similarity)
+		// Cosine distance ranges from 0 (identical) to 2 (opposite)
+		// We convert to similarity: 1 - (distance / 2) gives range [0, 1]
+		score := 1.0 - (distance / 2.0)
+
+		// Apply minimum score filter
+		if opts.MinScore > 0 && score < opts.MinScore {
+			continue
+		}
+
+		results = append(results, &types.MessageResult{
+			Message:  msg,
+			Score:    score,
+			ThreadID: msg.ThreadID,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate messages: %w", err)
+	}
+
+	return results, nil
 }
 
-// Helper functions for embedding encoding/decoding
-
-// encodeEmbedding converts a float32 slice to bytes for storage.
-func encodeEmbedding(embedding []float32) ([]byte, error) {
-	return json.Marshal(embedding)
-}
-
-// decodeEmbedding converts bytes back to a float32 slice.
-func decodeEmbedding(data []byte) ([]float32, error) {
-	var embedding []float32
-	err := json.Unmarshal(data, &embedding)
-	return embedding, err
-}

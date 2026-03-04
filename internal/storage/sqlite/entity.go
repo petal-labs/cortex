@@ -186,10 +186,100 @@ func (b *Backend) ResolveAlias(ctx context.Context, namespace, alias string) (*t
 }
 
 // SearchEntities performs semantic search across entity summaries.
-// Note: This is a placeholder - actual vector search will be implemented with vec0.
+// Uses sqlite-vec's vec_distance_cosine for brute-force KNN search.
 func (b *Backend) SearchEntities(ctx context.Context, namespace string, embedding []float32, opts storage.EntitySearchOpts) ([]*types.EntityResult, error) {
-	// This will be implemented when vec0 integration is added
-	return []*types.EntityResult{}, nil
+	if opts.TopK <= 0 {
+		opts.TopK = 10
+	}
+
+	// Encode query embedding as binary for sqlite-vec
+	queryEmbedding := encodeVectorBinary(embedding)
+
+	// Build the query
+	var args []any
+	query := `
+		SELECT e.id, e.namespace, e.name, e.type, e.aliases, e.summary,
+		       e.attributes, e.metadata, e.mention_count, e.first_seen_at, e.last_seen_at,
+		       vec_distance_cosine(emb.embedding, ?) AS distance
+		FROM entity_embeddings emb
+		JOIN entities e ON e.id = emb.entity_id
+		WHERE e.namespace = ?
+	`
+	args = append(args, queryEmbedding, namespace)
+
+	// Optional: filter by entity type
+	if opts.EntityType != nil {
+		query += " AND e.type = ?"
+		args = append(args, string(*opts.EntityType))
+	}
+
+	query += " ORDER BY distance ASC LIMIT ?"
+	args = append(args, opts.TopK)
+
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search entities: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*types.EntityResult
+	for rows.Next() {
+		entity := &types.Entity{}
+		var aliasesJSON, attributesJSON, metadataJSON, summary sql.NullString
+		var firstSeenAtUnix, lastSeenAtUnix int64
+		var entityType string
+		var distance float64
+
+		if err := rows.Scan(
+			&entity.ID, &entity.Namespace, &entity.Name, &entityType,
+			&aliasesJSON, &summary, &attributesJSON, &metadataJSON,
+			&entity.MentionCount, &firstSeenAtUnix, &lastSeenAtUnix, &distance,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan entity: %w", err)
+		}
+
+		entity.Type = types.EntityType(entityType)
+		entity.Summary = summary.String
+		entity.FirstSeenAt = time.Unix(firstSeenAtUnix, 0).UTC()
+		entity.LastSeenAt = time.Unix(lastSeenAtUnix, 0).UTC()
+
+		if aliasesJSON.Valid && aliasesJSON.String != "" {
+			if err := json.Unmarshal([]byte(aliasesJSON.String), &entity.Aliases); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal aliases: %w", err)
+			}
+		}
+		if attributesJSON.Valid && attributesJSON.String != "" {
+			if err := json.Unmarshal([]byte(attributesJSON.String), &entity.Attributes); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal attributes: %w", err)
+			}
+		}
+		if metadataJSON.Valid && metadataJSON.String != "" {
+			if err := json.Unmarshal([]byte(metadataJSON.String), &entity.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+
+		// Convert distance to similarity score (cosine distance -> similarity)
+		// Cosine distance ranges from 0 (identical) to 2 (opposite)
+		// We convert to similarity: 1 - (distance / 2) gives range [0, 1]
+		score := 1.0 - (distance / 2.0)
+
+		// Apply minimum score filter
+		if opts.MinScore > 0 && score < opts.MinScore {
+			continue
+		}
+
+		results = append(results, &types.EntityResult{
+			Entity: entity,
+			Score:  score,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate entities: %w", err)
+	}
+
+	return results, nil
 }
 
 // ListEntities returns entities in a namespace with optional filtering.
@@ -658,13 +748,12 @@ func (b *Backend) RegisterAlias(ctx context.Context, namespace, alias, entityID 
 }
 
 // StoreEntityEmbedding stores the embedding for an entity's summary.
+// Embeddings are stored in binary format for use with sqlite-vec.
 func (b *Backend) StoreEntityEmbedding(ctx context.Context, entityID string, embedding []float32) error {
-	embeddingBytes, err := encodeEmbedding(embedding)
-	if err != nil {
-		return fmt.Errorf("failed to encode embedding: %w", err)
-	}
+	// Encode embedding as binary for sqlite-vec compatibility
+	embeddingBytes := encodeVectorBinary(embedding)
 
-	_, err = b.db.ExecContext(ctx, `
+	_, err := b.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO entity_embeddings (entity_id, embedding)
 		VALUES (?, ?)
 	`, entityID, embeddingBytes)

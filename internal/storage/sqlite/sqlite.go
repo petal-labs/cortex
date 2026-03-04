@@ -3,16 +3,25 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/storage"
 )
+
+func init() {
+	// Register sqlite-vec extension with the sqlite3 driver.
+	// This must happen before any database connections are opened.
+	sqlite_vec.Auto()
+}
 
 // Backend implements storage.Backend using SQLite with the vec0 extension.
 type Backend struct {
@@ -142,3 +151,27 @@ func (b *Backend) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 
 // Context Storage operations are in context.go
 // Entity Storage operations are in entity.go
+
+// Vector encoding utilities for sqlite-vec compatibility
+
+// encodeVectorBinary converts a float32 slice to little-endian binary format
+// for use with sqlite-vec's vec_distance_* functions.
+func encodeVectorBinary(embedding []float32) []byte {
+	buf := make([]byte, len(embedding)*4)
+	for i, f := range embedding {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(f))
+	}
+	return buf
+}
+
+// decodeVectorBinary converts little-endian binary back to float32 slice.
+func decodeVectorBinary(data []byte) []float32 {
+	if len(data)%4 != 0 {
+		return nil
+	}
+	embedding := make([]float32, len(data)/4)
+	for i := range embedding {
+		embedding[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
+	}
+	return embedding
+}

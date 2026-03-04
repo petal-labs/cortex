@@ -243,13 +243,9 @@ func (b *Backend) InsertChunks(ctx context.Context, chunks []*types.Chunk) error
 				return fmt.Errorf("failed to insert chunk: %w", err)
 			}
 
-			// Insert embedding if present
+			// Insert embedding if present (binary format for sqlite-vec)
 			if len(chunk.Embedding) > 0 {
-				embeddingBytes, err := encodeEmbedding(chunk.Embedding)
-				if err != nil {
-					return fmt.Errorf("failed to encode embedding: %w", err)
-				}
-
+				embeddingBytes := encodeVectorBinary(chunk.Embedding)
 				_, err = embeddingStmt.ExecContext(ctx, chunk.ID, embeddingBytes)
 				if err != nil {
 					return fmt.Errorf("failed to insert chunk embedding: %w", err)
@@ -432,11 +428,119 @@ func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID s
 }
 
 // SearchChunks performs semantic search across chunks in a namespace.
-// Note: This is a placeholder - actual vector search will be implemented with vec0.
+// Uses sqlite-vec's vec_distance_cosine for brute-force KNN search.
 func (b *Backend) SearchChunks(ctx context.Context, namespace string, embedding []float32, opts storage.ChunkSearchOpts) ([]*types.ChunkResult, error) {
-	// This will be implemented when vec0 integration is added
-	// For now, return an empty result
-	return []*types.ChunkResult{}, nil
+	if opts.TopK <= 0 {
+		opts.TopK = 10
+	}
+
+	// Encode query embedding as binary for sqlite-vec
+	queryEmbedding := encodeVectorBinary(embedding)
+
+	// Build the query with joins for document info
+	var args []any
+	query := `
+		SELECT c.id, c.document_id, c.namespace, c.collection_id, c.content,
+		       c.chunk_index, c.token_count, c.metadata,
+		       d.title, d.source, d.metadata AS doc_metadata,
+		       vec_distance_cosine(e.embedding, ?) AS distance
+		FROM chunk_embeddings e
+		JOIN chunks c ON c.id = e.chunk_id
+		JOIN documents d ON d.id = c.document_id
+		WHERE c.namespace = ?
+	`
+	args = append(args, queryEmbedding, namespace)
+
+	// Optional: filter by collection
+	if opts.CollectionID != nil {
+		query += " AND c.collection_id = ?"
+		args = append(args, *opts.CollectionID)
+	}
+
+	// Note: Metadata filters would require JSON extraction which varies by SQLite version
+	// For now, we apply them in Go after fetching
+
+	query += " ORDER BY distance ASC LIMIT ?"
+	args = append(args, opts.TopK)
+
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search chunks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*types.ChunkResult
+	for rows.Next() {
+		chunk := &types.Chunk{}
+		result := &types.ChunkResult{Chunk: chunk}
+		var chunkMetadataJSON, docTitle, docSource, docMetadataJSON sql.NullString
+		var tokenCount sql.NullInt64
+		var distance float64
+
+		if err := rows.Scan(
+			&chunk.ID, &chunk.DocumentID, &chunk.Namespace, &chunk.CollectionID,
+			&chunk.Content, &chunk.Index, &tokenCount, &chunkMetadataJSON,
+			&docTitle, &docSource, &docMetadataJSON, &distance,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan chunk: %w", err)
+		}
+
+		if tokenCount.Valid {
+			chunk.TokenCount = int(tokenCount.Int64)
+		}
+
+		if chunkMetadataJSON.Valid && chunkMetadataJSON.String != "" {
+			if err := json.Unmarshal([]byte(chunkMetadataJSON.String), &chunk.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal chunk metadata: %w", err)
+			}
+		}
+
+		result.DocumentTitle = docTitle.String
+		result.Source = docSource.String
+
+		if docMetadataJSON.Valid && docMetadataJSON.String != "" {
+			if err := json.Unmarshal([]byte(docMetadataJSON.String), &result.DocMetadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal doc metadata: %w", err)
+			}
+		}
+
+		// Convert distance to similarity score (cosine distance -> similarity)
+		// Cosine distance ranges from 0 (identical) to 2 (opposite)
+		// We convert to similarity: 1 - (distance / 2) gives range [0, 1]
+		score := 1.0 - (distance / 2.0)
+
+		// Apply minimum score filter
+		if opts.MinScore > 0 && score < opts.MinScore {
+			continue
+		}
+
+		// Apply metadata filters in Go
+		if len(opts.Filters) > 0 {
+			// If filters are specified but chunk has no metadata, skip it
+			if chunk.Metadata == nil {
+				continue
+			}
+			match := true
+			for key, value := range opts.Filters {
+				if chunk.Metadata[key] != value {
+					match = false
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+
+		result.Score = score
+		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate chunks: %w", err)
+	}
+
+	return results, nil
 }
 
 // Helper function to check for unique constraint errors

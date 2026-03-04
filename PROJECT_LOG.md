@@ -62,8 +62,20 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - ListEntities (with type filter and sorting), DeleteEntity
   - InsertMention, GetMentions, MergeEntities
   - UpsertRelationship, GetRelationships, RegisterAlias
-  - StoreEntityEmbedding, SearchEntities (placeholder for vec0)
+  - StoreEntityEmbedding, SearchEntities
   - EnqueueExtraction, DequeueExtraction, CompleteExtraction, GetExtractionQueueStats
+
+**Milestone 1.2 Completed:**
+- sqlite-vec extension integrated for vector similarity search
+  - Added sqlite-vec-go-bindings CGO dependency
+  - Implemented binary encoding for embeddings (little-endian float32)
+  - SearchMessages: semantic search across conversation messages
+  - SearchChunks: semantic search across knowledge chunks with metadata filters
+  - SearchEntities: semantic search across entity summaries
+  - All search methods use vec_distance_cosine() for brute-force KNN
+  - Cosine distance converted to similarity score (0-1 range)
+  - Support for TopK, MinScore filtering, and type-specific filters
+- Full test coverage added for vector search functionality
 
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
@@ -84,6 +96,7 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/storage/sqlite/context_test.go` - Context tests
 - `internal/storage/sqlite/entity.go` - Entity storage ops
 - `internal/storage/sqlite/entity_test.go` - Entity tests
+- `internal/storage/sqlite/vector_search_test.go` - Vector search tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---

@@ -572,3 +572,375 @@ func TestMarkSummarized(t *testing.T) {
 		}
 	}
 }
+
+// MockSummarizer implements Summarizer for testing.
+type MockSummarizer struct {
+	summary   string
+	callCount int
+	messages  []*types.Message // Last messages passed to Summarize
+}
+
+func NewMockSummarizer(summary string) *MockSummarizer {
+	return &MockSummarizer{summary: summary}
+}
+
+func (m *MockSummarizer) SummarizeMessages(ctx context.Context, messages []*types.Message) (string, error) {
+	m.callCount++
+	m.messages = messages
+	return m.summary, nil
+}
+
+func TestSummarize(t *testing.T) {
+	t.Run("summarizes messages and updates thread", func(t *testing.T) {
+		engine, backend := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Create messages with explicit timestamps to ensure they're distinct
+		// This avoids relying on wall-clock time in tests
+		baseTime := time.Now().Unix()
+		for i := 0; i < 15; i++ {
+			msg := &types.Message{
+				ID:        "msg-" + string(rune('a'+i)),
+				Namespace: namespace,
+				ThreadID:  threadID,
+				Role:      "user",
+				Content:   "Message " + string(rune('a'+i)),
+				CreatedAt: time.Unix(baseTime+int64(i), 0), // Each message 1 second apart
+			}
+			if err := backend.AppendMessage(ctx, msg); err != nil {
+				t.Fatalf("failed to append: %v", err)
+			}
+		}
+
+		// Set up summarizer
+		summarizer := NewMockSummarizer("This is the conversation summary.")
+		engine.SetSummarizer(summarizer)
+
+		// Summarize with 5 messages kept
+		result, err := engine.Summarize(ctx, namespace, threadID, &SummarizeOpts{KeepRecent: 5})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify result
+		if result.Summary != "This is the conversation summary." {
+			t.Errorf("expected summary 'This is the conversation summary.', got %q", result.Summary)
+		}
+		if result.MessagesSummarized != 10 {
+			t.Errorf("expected 10 messages summarized, got %d", result.MessagesSummarized)
+		}
+		if result.MessagesKept != 5 {
+			t.Errorf("expected 5 messages kept, got %d", result.MessagesKept)
+		}
+
+		// Verify thread was updated
+		thread, err := backend.GetThread(ctx, namespace, threadID)
+		if err != nil {
+			t.Fatalf("failed to get thread: %v", err)
+		}
+		if thread.Summary != "This is the conversation summary." {
+			t.Errorf("expected thread summary to be updated, got %q", thread.Summary)
+		}
+
+		// Verify messages were marked as summarized
+		messages, _, err := backend.GetMessages(ctx, namespace, threadID, 100, "")
+		if err != nil {
+			t.Fatalf("failed to get messages: %v", err)
+		}
+
+		summarizedCount := 0
+		for _, msg := range messages {
+			if msg.Summarized {
+				summarizedCount++
+			}
+		}
+		if summarizedCount != 10 {
+			t.Errorf("expected 10 summarized messages, got %d", summarizedCount)
+		}
+	})
+
+	t.Run("returns error when no summarizer set", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		ctx := context.Background()
+
+		_, err := engine.Summarize(ctx, "ns", "thread", nil)
+		if err != ErrSummarizerNotSet {
+			t.Errorf("expected ErrSummarizerNotSet, got %v", err)
+		}
+	})
+
+	t.Run("returns error when not enough messages", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Add only 5 messages
+		for i := 0; i < 5; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+		}
+
+		engine.SetSummarizer(NewMockSummarizer("summary"))
+
+		// Try to summarize with keepRecent=10 (more than available)
+		_, err := engine.Summarize(ctx, namespace, threadID, &SummarizeOpts{KeepRecent: 10})
+		if err != ErrNothingToSummarize {
+			t.Errorf("expected ErrNothingToSummarize, got %v", err)
+		}
+	})
+
+	t.Run("uses default keepRecent when not specified", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Add 20 messages
+		for i := 0; i < 20; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+			time.Sleep(5 * time.Millisecond)
+		}
+
+		summarizer := NewMockSummarizer("summary")
+		engine.SetSummarizer(summarizer)
+
+		result, err := engine.Summarize(ctx, namespace, threadID, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Default keepRecent is 10, so 10 should be summarized
+		if result.MessagesSummarized != 10 {
+			t.Errorf("expected 10 messages summarized (default keepRecent=10), got %d", result.MessagesSummarized)
+		}
+	})
+
+	t.Run("includes previous summary in context", func(t *testing.T) {
+		engine, backend := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Add messages
+		for i := 0; i < 20; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+			time.Sleep(5 * time.Millisecond)
+		}
+
+		// Set an existing summary on the thread
+		thread, _ := backend.GetThread(ctx, namespace, threadID)
+		thread.Summary = "Previous conversation summary"
+		backend.UpdateThread(ctx, thread)
+
+		summarizer := NewMockSummarizer("New combined summary")
+		engine.SetSummarizer(summarizer)
+
+		_, err := engine.Summarize(ctx, namespace, threadID, &SummarizeOpts{KeepRecent: 10})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify the previous summary was included in the messages to summarize
+		if len(summarizer.messages) == 0 {
+			t.Fatal("expected messages to be passed to summarizer")
+		}
+
+		// First message should be the previous summary
+		firstMsg := summarizer.messages[0]
+		if firstMsg.Role != "system" {
+			t.Errorf("expected first message role to be 'system', got %q", firstMsg.Role)
+		}
+		if firstMsg.Content != "[Previous summary]: Previous conversation summary" {
+			t.Errorf("expected first message to contain previous summary, got %q", firstMsg.Content)
+		}
+	})
+}
+
+func TestAutoSummarization(t *testing.T) {
+	t.Run("auto-triggers summarization on history call", func(t *testing.T) {
+		engine, backend := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 10 // Low threshold for testing
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Create messages with explicit timestamps (over threshold)
+		baseTime := time.Now().Unix()
+		for i := 0; i < 15; i++ {
+			msg := &types.Message{
+				ID:        "msg-auto-" + string(rune('a'+i)),
+				Namespace: namespace,
+				ThreadID:  threadID,
+				Role:      "user",
+				Content:   "Message " + string(rune('a'+i)),
+				CreatedAt: time.Unix(baseTime+int64(i), 0),
+			}
+			if err := backend.AppendMessage(ctx, msg); err != nil {
+				t.Fatalf("failed to append: %v", err)
+			}
+		}
+
+		// Set up summarizer
+		summarizer := NewMockSummarizer("Auto-generated summary")
+		engine.SetSummarizer(summarizer)
+
+		// Call History - should auto-trigger summarization
+		result, err := engine.History(ctx, namespace, threadID, &HistoryOpts{
+			IncludeSummary: true,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify summarization was triggered
+		if summarizer.callCount != 1 {
+			t.Errorf("expected summarizer to be called once, got %d", summarizer.callCount)
+		}
+
+		// Verify thread has summary
+		thread, err := backend.GetThread(ctx, namespace, threadID)
+		if err != nil {
+			t.Fatalf("failed to get thread: %v", err)
+		}
+		if thread.Summary != "Auto-generated summary" {
+			t.Errorf("expected thread to have auto-generated summary, got %q", thread.Summary)
+		}
+
+		// Verify result includes summary
+		if result.Summary != "Auto-generated summary" {
+			t.Errorf("expected result to include summary, got %q", result.Summary)
+		}
+	})
+
+	t.Run("skips auto-summarization when no summarizer", func(t *testing.T) {
+		engine, backend := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 5
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Create messages over threshold
+		for i := 0; i < 10; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+		}
+
+		// No summarizer set - should not panic or error
+		result, err := engine.History(ctx, namespace, threadID, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should return messages without summary
+		if len(result.Messages) == 0 {
+			t.Error("expected messages to be returned")
+		}
+
+		// Thread should have no summary
+		thread, _ := backend.GetThread(ctx, namespace, threadID)
+		if thread.Summary != "" {
+			t.Errorf("expected no summary without summarizer, got %q", thread.Summary)
+		}
+	})
+
+	t.Run("respects SkipAutoSummarize option", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 5
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Create messages over threshold
+		for i := 0; i < 10; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+		}
+
+		// Set up summarizer
+		summarizer := NewMockSummarizer("Summary")
+		engine.SetSummarizer(summarizer)
+
+		// Call History with SkipAutoSummarize
+		_, err := engine.History(ctx, namespace, threadID, &HistoryOpts{
+			SkipAutoSummarize: true,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Summarizer should NOT have been called
+		if summarizer.callCount != 0 {
+			t.Errorf("expected summarizer to not be called when SkipAutoSummarize=true, got %d calls", summarizer.callCount)
+		}
+	})
+}
+
+func TestShouldSummarize(t *testing.T) {
+	t.Run("returns true when over threshold", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 10
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Add messages over threshold
+		for i := 0; i < 15; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+		}
+
+		should, err := engine.ShouldSummarize(ctx, namespace, threadID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !should {
+			t.Error("expected ShouldSummarize to return true")
+		}
+	})
+
+	t.Run("returns false when under threshold", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 20
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Add fewer messages than threshold
+		for i := 0; i < 10; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+		}
+
+		should, err := engine.ShouldSummarize(ctx, namespace, threadID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if should {
+			t.Error("expected ShouldSummarize to return false")
+		}
+	})
+
+	t.Run("returns false when threshold is 0", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 0
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		for i := 0; i < 100; i++ {
+			engine.Append(ctx, namespace, threadID, "user", "Message", nil)
+		}
+
+		should, err := engine.ShouldSummarize(ctx, namespace, threadID)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if should {
+			t.Error("expected ShouldSummarize to return false when threshold is 0 (disabled)")
+		}
+	})
+}

@@ -15,10 +15,17 @@ import (
 
 // Common errors returned by the conversation engine.
 var (
-	ErrEmptyContent   = errors.New("message content cannot be empty")
-	ErrInvalidRole    = errors.New("invalid message role")
-	ErrThreadNotFound = errors.New("thread not found")
+	ErrEmptyContent        = errors.New("message content cannot be empty")
+	ErrInvalidRole         = errors.New("invalid message role")
+	ErrThreadNotFound      = errors.New("thread not found")
+	ErrNothingToSummarize  = errors.New("not enough messages to summarize")
+	ErrSummarizerNotSet    = errors.New("summarizer not configured")
 )
+
+// Summarizer generates summaries from conversation messages.
+type Summarizer interface {
+	SummarizeMessages(ctx context.Context, messages []*types.Message) (string, error)
+}
 
 // ValidRoles defines the allowed message roles.
 var ValidRoles = map[string]bool{
@@ -31,13 +38,15 @@ var ValidRoles = map[string]bool{
 // Engine implements the conversation memory logic layer.
 // It orchestrates storage and embedding operations for conversation management.
 type Engine struct {
-	storage   storage.Backend
-	embedding embedding.Provider
-	cfg       *config.ConversationConfig
+	storage    storage.Backend
+	embedding  embedding.Provider
+	summarizer Summarizer
+	cfg        *config.ConversationConfig
 }
 
 // NewEngine creates a new conversation engine.
 // The embedding provider can be nil if semantic search is disabled.
+// The summarizer can be nil if summarization is not needed.
 func NewEngine(store storage.Backend, emb embedding.Provider, cfg *config.ConversationConfig) (*Engine, error) {
 	if store == nil {
 		return nil, errors.New("storage backend is required")
@@ -53,6 +62,12 @@ func NewEngine(store storage.Backend, emb embedding.Provider, cfg *config.Conver
 		embedding: emb,
 		cfg:       cfg,
 	}, nil
+}
+
+// SetSummarizer sets the summarizer for conversation summarization.
+// This is optional and can be called after engine creation.
+func (e *Engine) SetSummarizer(s Summarizer) {
+	e.summarizer = s
 }
 
 // AppendOpts contains options for appending a message.
@@ -124,9 +139,10 @@ func (e *Engine) Append(ctx context.Context, namespace, threadID, role, content 
 
 // HistoryOpts contains options for retrieving conversation history.
 type HistoryOpts struct {
-	LastN          int    // Number of recent messages to retrieve (0 = use default)
-	IncludeSummary bool   // Prepend thread summary if available
-	Cursor         string // Pagination cursor
+	LastN              int    // Number of recent messages to retrieve (0 = use default)
+	IncludeSummary     bool   // Prepend thread summary if available
+	Cursor             string // Pagination cursor
+	SkipAutoSummarize  bool   // Skip auto-summarization check (internal use)
 }
 
 // HistoryResult contains the result of a history query.
@@ -139,9 +155,21 @@ type HistoryResult struct {
 
 // History retrieves conversation history for a thread.
 // Returns messages in chronological order (oldest first).
+// Auto-triggers summarization if message count exceeds threshold.
 func (e *Engine) History(ctx context.Context, namespace, threadID string, opts *HistoryOpts) (*HistoryResult, error) {
 	if opts == nil {
 		opts = &HistoryOpts{}
+	}
+
+	// Check for auto-summarization before fetching history
+	if !opts.SkipAutoSummarize && e.summarizer != nil {
+		should, err := e.ShouldSummarize(ctx, namespace, threadID)
+		if err == nil && should {
+			// Trigger summarization with default keep_recent (10)
+			_, _ = e.Summarize(ctx, namespace, threadID, nil)
+			// Ignore errors - summarization is best-effort
+			// The history will still be returned even if summarization fails
+		}
 	}
 
 	limit := opts.LastN
@@ -286,4 +314,109 @@ func (e *Engine) UpdateThread(ctx context.Context, thread *types.Thread) error {
 // This is used after summarization to track which messages were summarized.
 func (e *Engine) MarkSummarized(ctx context.Context, namespace, threadID string, beforeTime time.Time) error {
 	return e.storage.MarkMessagesSummarized(ctx, namespace, threadID, beforeTime.Unix())
+}
+
+// SummarizeOpts contains options for summarization.
+type SummarizeOpts struct {
+	KeepRecent int // Number of recent messages to keep unsummarized (default: 10)
+}
+
+// SummarizeResult contains the result of summarization.
+type SummarizeResult struct {
+	Summary            string `json:"summary"`
+	MessagesSummarized int    `json:"messages_summarized"`
+	MessagesKept       int    `json:"messages_kept"`
+	ThreadID           string `json:"thread_id"`
+}
+
+// Summarize compresses older messages into a summary via LLM.
+// The summary is stored in the thread record and older messages are marked as summarized.
+// Recent messages (controlled by KeepRecent) are left unsummarized.
+func (e *Engine) Summarize(ctx context.Context, namespace, threadID string, opts *SummarizeOpts) (*SummarizeResult, error) {
+	if e.summarizer == nil {
+		return nil, ErrSummarizerNotSet
+	}
+
+	if opts == nil {
+		opts = &SummarizeOpts{KeepRecent: 10}
+	}
+
+	if opts.KeepRecent <= 0 {
+		opts.KeepRecent = 10
+	}
+
+	// Get all messages in the thread (we need to retrieve all for summarization)
+	// Use a large limit to get all messages
+	allMessages, _, err := e.storage.GetMessages(ctx, namespace, threadID, 10000, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get messages: %w", err)
+	}
+
+	// Check if there are enough messages to summarize
+	if len(allMessages) <= opts.KeepRecent {
+		return nil, ErrNothingToSummarize
+	}
+
+	// Separate messages into "to summarize" and "to keep"
+	splitIndex := len(allMessages) - opts.KeepRecent
+	toSummarize := allMessages[:splitIndex]
+
+	// Get the thread to check for existing summary
+	thread, err := e.storage.GetThread(ctx, namespace, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get thread: %w", err)
+	}
+
+	// If there's an existing summary, prepend it to the messages to summarize
+	// This creates a rolling summary that incorporates previous summaries
+	if thread.Summary != "" {
+		summaryMsg := &types.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("[Previous summary]: %s", thread.Summary),
+		}
+		toSummarize = append([]*types.Message{summaryMsg}, toSummarize...)
+	}
+
+	// Generate the summary
+	summary, err := e.summarizer.SummarizeMessages(ctx, toSummarize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate summary: %w", err)
+	}
+
+	// Update the thread with the new summary
+	thread.Summary = summary
+	thread.UpdatedAt = time.Now().UTC()
+	if err := e.storage.UpdateThread(ctx, thread); err != nil {
+		return nil, fmt.Errorf("failed to update thread with summary: %w", err)
+	}
+
+	// Mark the summarized messages
+	// Use the timestamp of the last summarized message + 1 second
+	// to include it in the "before" comparison (storage uses <)
+	lastSummarizedTime := allMessages[splitIndex-1].CreatedAt
+	if err := e.storage.MarkMessagesSummarized(ctx, namespace, threadID, lastSummarizedTime.Unix()+1); err != nil {
+		return nil, fmt.Errorf("failed to mark messages as summarized: %w", err)
+	}
+
+	return &SummarizeResult{
+		Summary:            summary,
+		MessagesSummarized: splitIndex,
+		MessagesKept:       len(allMessages) - splitIndex,
+		ThreadID:           threadID,
+	}, nil
+}
+
+// ShouldSummarize checks if a thread should be auto-summarized based on message count.
+func (e *Engine) ShouldSummarize(ctx context.Context, namespace, threadID string) (bool, error) {
+	if e.cfg.AutoSummarizeThreshold <= 0 {
+		return false, nil
+	}
+
+	// Get message count (use a minimal query)
+	messages, _, err := e.storage.GetMessages(ctx, namespace, threadID, e.cfg.AutoSummarizeThreshold+1, "")
+	if err != nil {
+		return false, err
+	}
+
+	return len(messages) > e.cfg.AutoSummarizeThreshold, nil
 }

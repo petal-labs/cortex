@@ -235,6 +235,39 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/server/mcp_test.go` - MCP server tests
 - `pkg/types/*.go` - Shared type definitions
 
+**Milestone 1.9 Completed:**
+- CLI serve command implemented
+  - Wires config, storage, embedding, and all engines
+  - Supports --namespace flag for restricted mode
+  - Supports --mcp flag (default true)
+- `internal/cmd/serve.go` - serve command implementation
+
+**Milestone 2.1 Completed:**
+- Summarization client implemented
+  - HTTP client for Iris /v1/completions endpoint
+  - SummarizeMessages convenience method
+  - System prompt for conversation summarization
+- Conversation engine Summarize operation
+  - Splits messages into "to summarize" and "to keep"
+  - Stores summary in thread record
+  - Marks summarized messages
+  - Rolling summary incorporates previous summaries
+- Auto-summarization trigger in History method
+  - Checks message count vs threshold
+  - Triggers summarization automatically when exceeded
+  - SkipAutoSummarize option for internal use
+- MCP handler for conversation_summarize
+  - Accepts namespace, thread_id, keep_recent parameters
+  - Returns summary and message counts
+- Serve command wires up summarizer
+  - Creates summarization client when Iris is configured
+  - Sets summarizer on conversation engine
+- Full test coverage (new tests: 10+)
+
+**New Files:**
+- `internal/summarization/client.go` - LLM completion client
+- `internal/summarization/client_test.go` - Client tests
+
 ---
 
 ## Implementation Status
@@ -248,9 +281,10 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - [x] Workflow Context Engine
 - [x] Entity Memory Engine
 - [x] MCP Server
+- [x] CLI Serve Command
 
 ### Phase 2: Advanced Features
-- [ ] Conversation Summarization
+- [x] Conversation Summarization
 - [ ] Semantic Chunking
 - [ ] Context Version History
 - [ ] Entity Extraction Pipeline

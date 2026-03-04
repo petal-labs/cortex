@@ -14,6 +14,7 @@ import (
 	"github.com/petal-labs/cortex/internal/knowledge"
 	"github.com/petal-labs/cortex/internal/server"
 	"github.com/petal-labs/cortex/internal/storage/sqlite"
+	"github.com/petal-labs/cortex/internal/summarization"
 )
 
 var (
@@ -82,6 +83,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	convEngine, err := conversation.NewEngine(store, emb, &cfg.Conversation)
 	if err != nil {
 		return fmt.Errorf("failed to create conversation engine: %w", err)
+	}
+
+	// Set up summarization if Iris is configured
+	if cfg.Iris.Endpoint != "" && cfg.Summarization.Model != "" {
+		summClient := summarization.NewClient(cfg)
+		convEngine.SetSummarizer(summClient)
 	}
 
 	knowEngine, err := knowledge.NewEngine(store, emb, &cfg.Knowledge)

@@ -244,6 +244,51 @@ func TestConversationSearch(t *testing.T) {
 	}
 }
 
+func TestConversationSummarize(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Add messages to create a thread
+	for i := 0; i < 5; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		req := makeToolRequest("conversation_append", map[string]any{
+			"namespace": "test-ns",
+			"thread_id": "summ-thread",
+			"role":      role,
+			"content":   "Test message content",
+		})
+		if _, err := srv.handleConversationAppend(ctx, req); err != nil {
+			t.Fatalf("failed to append message: %v", err)
+		}
+	}
+
+	// Try to summarize - should fail because no summarizer is configured
+	summReq := makeToolRequest("conversation_summarize", map[string]any{
+		"namespace":   "test-ns",
+		"thread_id":   "summ-thread",
+		"keep_recent": float64(2),
+	})
+
+	result, err := srv.handleConversationSummarize(ctx, summReq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should return a tool error because no summarizer is set
+	if !result.IsError {
+		t.Error("expected tool error when no summarizer is configured")
+	}
+
+	// The error message should indicate summarizer is not set
+	errorText := getTextContent(result)
+	if errorText == "" {
+		t.Error("expected error message in result")
+	}
+}
+
 func TestKnowledgeIngestAndSearch(t *testing.T) {
 	srv := testServer(t, "")
 	ctx := context.Background()

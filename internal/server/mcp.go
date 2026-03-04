@@ -154,6 +154,23 @@ func (s *Server) registerConversationTools() {
 		),
 	)
 	s.mcp.AddTool(searchTool, s.handleConversationSearch)
+
+	// conversation_summarize
+	summarizeTool := mcp.NewTool("conversation_summarize",
+		mcp.WithDescription("Compress older messages into a summary via LLM to manage context window limits."),
+		mcp.WithString("namespace",
+			mcp.Required(),
+			mcp.Description("Isolation scope"),
+		),
+		mcp.WithString("thread_id",
+			mcp.Required(),
+			mcp.Description("Conversation thread identifier"),
+		),
+		mcp.WithNumber("keep_recent",
+			mcp.Description("Number of recent messages to keep unsummarized (default: 10)"),
+		),
+	)
+	s.mcp.AddTool(summarizeTool, s.handleConversationSummarize)
 }
 
 // registerKnowledgeTools registers knowledge store tools.
@@ -588,6 +605,34 @@ func (s *Server) handleConversationSearch(ctx context.Context, req mcp.CallToolR
 	}
 
 	result, err := s.conversation.Search(ctx, namespace, query, opts)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleConversationSummarize(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	namespace, err := req.RequireString("namespace")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := s.checkNamespace(namespace); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	threadID, err := req.RequireString("thread_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	opts := &conversation.SummarizeOpts{}
+
+	if keepRecent, ok := req.GetArguments()["keep_recent"].(float64); ok {
+		opts.KeepRecent = int(keepRecent)
+	}
+
+	result, err := s.conversation.Summarize(ctx, namespace, threadID, opts)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

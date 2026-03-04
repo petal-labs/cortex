@@ -285,6 +285,31 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/knowledge/semantic_chunker.go` - Semantic chunker implementation
 - `internal/knowledge/semantic_chunker_test.go` - Semantic chunker tests
 
+**Milestone 2.3 In Progress:**
+- Entity extraction client implemented
+  - LLM-powered entity extraction via Iris completion API
+  - JSON response parsing with validation
+  - Entity normalization and filtering
+  - Co-mentioned entity relationship extraction
+- Name resolver implemented
+  - Blocking strategy (first 3 chars, initialism matching)
+  - Fuzzy matching using Levenshtein distance
+  - Multi-phase resolution: exact → alias → fuzzy → new
+- Queue processor implemented
+  - Background worker with configurable polling interval
+  - Batch processing with retry and exponential backoff
+  - Support for extraction modes: off, sampled, whitelist, full
+  - ProcessSingle for on-demand extraction
+- Full test coverage (25+ new tests)
+
+**New Files:**
+- `internal/entity/extractor.go` - Entity extraction client
+- `internal/entity/extractor_test.go` - Extractor tests
+- `internal/entity/resolver.go` - Name resolution with blocking/fuzzy
+- `internal/entity/resolver_test.go` - Resolver tests
+- `internal/entity/queue.go` - Queue processor
+- `internal/entity/queue_test.go` - Queue processor tests
+
 ---
 
 ## Implementation Status

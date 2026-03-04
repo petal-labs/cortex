@@ -4,7 +4,7 @@
 **Name:** Cortex - PetalFlow Memory & Knowledge Service
 **Type:** Go service (MCP server)
 **Created:** 2026-03-04
-**Status:** Planning Phase
+**Status:** Development Phase - Phase 1
 
 ## Purpose
 Cortex provides persistent context, vector-backed knowledge retrieval, and conversation memory for PetalFlow agents. It implements four memory primitives:
@@ -105,6 +105,20 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - Config-driven semantic search (can be disabled)
 - Full test coverage (12 tests)
 
+**Milestone 1.5 Completed:**
+- Knowledge store engine implemented with all core operations
+  - Ingest: document ingestion with chunking and embedding generation
+  - Search: semantic search across chunks with context window expansion
+  - Get/Delete: document retrieval and removal
+  - Collections: create, list, get, delete with stats
+- Text chunking strategies implemented
+  - Fixed: word-based chunking with configurable overlap
+  - Sentence: splits on sentence boundaries, cascades to fixed for long sentences
+  - Paragraph: splits on double newlines, cascades to sentence for long paragraphs
+- Batch embedding generation during ingest
+- Graceful degradation when embeddings fail
+- Full test coverage (44 tests across chunker and engine)
+
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
 - `.project/TASK_CHECKLIST.md` - Quick-reference checklist
@@ -131,6 +145,10 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/embedding/provider_test.go` - Embedding tests
 - `internal/conversation/engine.go` - Conversation memory engine
 - `internal/conversation/engine_test.go` - Conversation engine tests
+- `internal/knowledge/chunker.go` - Text chunking strategies
+- `internal/knowledge/chunker_test.go` - Chunker tests
+- `internal/knowledge/engine.go` - Knowledge store engine
+- `internal/knowledge/engine_test.go` - Knowledge engine tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---
@@ -138,11 +156,11 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 ## Implementation Status
 
 ### Phase 1: Foundation
-- [ ] Project Structure & Go Module
-- [ ] Storage Interface & SQLite Backend
-- [ ] Embedding Provider (Iris Integration)
-- [ ] Conversation Memory Engine
-- [ ] Knowledge Store Engine
+- [x] Project Structure & Go Module
+- [x] Storage Interface & SQLite Backend
+- [x] Embedding Provider (Iris Integration)
+- [x] Conversation Memory Engine
+- [x] Knowledge Store Engine
 - [ ] Workflow Context Engine
 - [ ] Entity Memory Engine
 - [ ] MCP Server

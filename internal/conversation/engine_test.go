@@ -944,3 +944,110 @@ func TestShouldSummarize(t *testing.T) {
 		}
 	})
 }
+
+// MockExtractionEnqueuer implements ExtractionEnqueuer for testing.
+type MockExtractionEnqueuer struct {
+	callCount int
+	items     []extractionItem
+}
+
+type extractionItem struct {
+	namespace  string
+	sourceType string
+	sourceID   string
+	content    string
+}
+
+func NewMockExtractionEnqueuer() *MockExtractionEnqueuer {
+	return &MockExtractionEnqueuer{}
+}
+
+func (m *MockExtractionEnqueuer) EnqueueForExtraction(ctx context.Context, namespace, sourceType, sourceID, content string) error {
+	m.callCount++
+	m.items = append(m.items, extractionItem{
+		namespace:  namespace,
+		sourceType: sourceType,
+		sourceID:   sourceID,
+		content:    content,
+	})
+	return nil
+}
+
+func (m *MockExtractionEnqueuer) CallCount() int {
+	return m.callCount
+}
+
+func TestExtractionEnqueuer(t *testing.T) {
+	t.Run("enqueues message for extraction on append", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-1"
+
+		// Set up extraction enqueuer
+		enqueuer := NewMockExtractionEnqueuer()
+		engine.SetExtractionEnqueuer(enqueuer)
+
+		// Append a message
+		msg, err := engine.Append(ctx, namespace, threadID, "user", "Hello, this is a test message", nil)
+		if err != nil {
+			t.Fatalf("failed to append: %v", err)
+		}
+
+		// Verify extraction was enqueued
+		if enqueuer.callCount != 1 {
+			t.Errorf("expected 1 extraction call, got %d", enqueuer.callCount)
+		}
+
+		// Verify extraction item details
+		if len(enqueuer.items) != 1 {
+			t.Fatalf("expected 1 extraction item, got %d", len(enqueuer.items))
+		}
+
+		item := enqueuer.items[0]
+		if item.namespace != namespace {
+			t.Errorf("expected namespace %q, got %q", namespace, item.namespace)
+		}
+		if item.sourceType != "conversation" {
+			t.Errorf("expected sourceType 'conversation', got %q", item.sourceType)
+		}
+		if item.sourceID != msg.ID {
+			t.Errorf("expected sourceID %q, got %q", msg.ID, item.sourceID)
+		}
+		if item.content != "Hello, this is a test message" {
+			t.Errorf("expected content to match message, got %q", item.content)
+		}
+	})
+
+	t.Run("does not enqueue when no enqueuer set", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		ctx := context.Background()
+
+		// No enqueuer set - should not panic
+		_, err := engine.Append(ctx, "test-ns", "thread-1", "user", "Hello", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("enqueues for each message", func(t *testing.T) {
+		engine, _ := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+
+		enqueuer := NewMockExtractionEnqueuer()
+		engine.SetExtractionEnqueuer(enqueuer)
+
+		// Append multiple messages
+		for i := 0; i < 5; i++ {
+			_, err := engine.Append(ctx, namespace, "thread-1", "user", "Message", nil)
+			if err != nil {
+				t.Fatalf("failed to append: %v", err)
+			}
+		}
+
+		if enqueuer.callCount != 5 {
+			t.Errorf("expected 5 extraction calls, got %d", enqueuer.callCount)
+		}
+	})
+}

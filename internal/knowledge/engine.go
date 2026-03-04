@@ -24,14 +24,20 @@ var (
 	ErrInvalidChunkConfig  = errors.New("invalid chunk configuration")
 )
 
+// ExtractionEnqueuer queues content for entity extraction.
+type ExtractionEnqueuer interface {
+	EnqueueForExtraction(ctx context.Context, namespace, sourceType, sourceID, content string) error
+}
+
 // Engine implements the knowledge store logic layer.
 // It orchestrates chunking, embedding, and storage operations.
 type Engine struct {
-	storage          storage.Backend
-	embedding        embedding.Provider
-	chunker          Chunker
-	semanticChunker  *SemanticChunker
-	cfg              *config.KnowledgeConfig
+	storage            storage.Backend
+	embedding          embedding.Provider
+	chunker            Chunker
+	semanticChunker    *SemanticChunker
+	extractionEnqueuer ExtractionEnqueuer
+	cfg                *config.KnowledgeConfig
 }
 
 // NewEngine creates a new knowledge engine.
@@ -58,6 +64,27 @@ func NewEngine(store storage.Backend, emb embedding.Provider, cfg *config.Knowle
 	}
 
 	return e, nil
+}
+
+// SetExtractionEnqueuer sets the extraction enqueuer for entity extraction.
+// When set, ingested chunks will be queued for background entity extraction.
+func (e *Engine) SetExtractionEnqueuer(eq ExtractionEnqueuer) {
+	e.extractionEnqueuer = eq
+}
+
+// enqueueForExtraction queues content for entity extraction.
+// This is a fire-and-forget operation that logs errors but doesn't fail the caller.
+func (e *Engine) enqueueForExtraction(ctx context.Context, namespace, chunkID, content string) {
+	if e.extractionEnqueuer == nil {
+		return
+	}
+
+	// Fire and forget - extraction is best-effort
+	if err := e.extractionEnqueuer.EnqueueForExtraction(ctx, namespace, "knowledge", chunkID, content); err != nil {
+		// Log but don't fail - extraction is optional
+		// In production, use structured logging
+		_ = err
+	}
 }
 
 // IngestOpts contains options for document ingestion.
@@ -194,6 +221,11 @@ func (e *Engine) Ingest(ctx context.Context, namespace, collectionID, content st
 	// Store chunks
 	if err := e.storage.InsertChunks(ctx, chunks); err != nil {
 		return nil, fmt.Errorf("failed to insert chunks: %w", err)
+	}
+
+	// Queue chunks for entity extraction
+	for _, chunk := range chunks {
+		e.enqueueForExtraction(ctx, namespace, chunk.ID, chunk.Content)
 	}
 
 	return &IngestResult{

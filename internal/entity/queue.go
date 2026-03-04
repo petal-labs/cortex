@@ -398,3 +398,29 @@ func (q *QueueProcessor) ProcessSingle(ctx context.Context, namespace, content, 
 
 	return result, nil
 }
+
+// ExtractionEnqueuerAdapter adapts the storage backend to the ExtractionEnqueuer
+// interface expected by conversation and knowledge engines.
+type ExtractionEnqueuerAdapter struct {
+	storage storage.Backend
+}
+
+// NewExtractionEnqueuerAdapter creates a new adapter that wraps a storage backend.
+func NewExtractionEnqueuerAdapter(store storage.Backend) *ExtractionEnqueuerAdapter {
+	return &ExtractionEnqueuerAdapter{storage: store}
+}
+
+// EnqueueForExtraction queues content for entity extraction.
+// Implements the interface expected by conversation.ExtractionEnqueuer and
+// knowledge.ExtractionEnqueuer.
+func (a *ExtractionEnqueuerAdapter) EnqueueForExtraction(ctx context.Context, namespace, sourceType, sourceID, content string) error {
+	item := &types.ExtractionQueueItem{
+		Namespace:  namespace,
+		SourceType: sourceType,
+		SourceID:   sourceID,
+		Content:    content,
+		Status:     "pending",
+		CreatedAt:  time.Now().UTC(),
+	}
+	return a.storage.EnqueueExtraction(ctx, item)
+}

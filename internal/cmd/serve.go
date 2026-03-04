@@ -106,6 +106,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create entity engine: %w", err)
 	}
 
+	// Set up entity extraction pipeline if Iris is configured and extraction is enabled
+	var queueProcessor *entity.QueueProcessor
+	if cfg.Iris.Endpoint != "" && cfg.Entity.ExtractionMode != "off" {
+		// Create extractor (uses Iris completion API)
+		extractor := entity.NewExtractor(cfg)
+
+		// Create name resolver with configurable fuzzy threshold
+		resolver := entity.NewResolver(store, cfg.Entity.AliasFuzzyThreshold)
+
+		// Create queue processor
+		queueProcessor = entity.NewQueueProcessor(store, extractor, resolver, entityEngine, &cfg.Entity)
+
+		// Create enqueuer adapter and set on engines
+		enqueuer := entity.NewExtractionEnqueuerAdapter(store)
+		convEngine.SetExtractionEnqueuer(enqueuer)
+		knowEngine.SetExtractionEnqueuer(enqueuer)
+	}
+
 	// Start MCP server
 	if mcpMode {
 		mcpCfg := &server.Config{
@@ -115,6 +133,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 
 		srv := server.New(mcpCfg, convEngine, knowEngine, ctxEngine, entityEngine)
+
+		// Start queue processor in background if configured
+		if queueProcessor != nil {
+			ctx := cmd.Context()
+			queueProcessor.Start(ctx)
+		}
+
 		return srv.ServeStdio()
 	}
 

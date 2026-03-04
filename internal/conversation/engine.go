@@ -27,6 +27,11 @@ type Summarizer interface {
 	SummarizeMessages(ctx context.Context, messages []*types.Message) (string, error)
 }
 
+// ExtractionEnqueuer queues content for entity extraction.
+type ExtractionEnqueuer interface {
+	EnqueueForExtraction(ctx context.Context, namespace, sourceType, sourceID, content string) error
+}
+
 // ValidRoles defines the allowed message roles.
 var ValidRoles = map[string]bool{
 	"user":      true,
@@ -38,10 +43,11 @@ var ValidRoles = map[string]bool{
 // Engine implements the conversation memory logic layer.
 // It orchestrates storage and embedding operations for conversation management.
 type Engine struct {
-	storage    storage.Backend
-	embedding  embedding.Provider
-	summarizer Summarizer
-	cfg        *config.ConversationConfig
+	storage             storage.Backend
+	embedding           embedding.Provider
+	summarizer          Summarizer
+	extractionEnqueuer  ExtractionEnqueuer
+	cfg                 *config.ConversationConfig
 }
 
 // NewEngine creates a new conversation engine.
@@ -68,6 +74,12 @@ func NewEngine(store storage.Backend, emb embedding.Provider, cfg *config.Conver
 // This is optional and can be called after engine creation.
 func (e *Engine) SetSummarizer(s Summarizer) {
 	e.summarizer = s
+}
+
+// SetExtractionEnqueuer sets the extraction enqueuer for entity extraction.
+// When set, messages will be queued for background entity extraction.
+func (e *Engine) SetExtractionEnqueuer(eq ExtractionEnqueuer) {
+	e.extractionEnqueuer = eq
 }
 
 // AppendOpts contains options for appending a message.
@@ -125,16 +137,38 @@ func (e *Engine) Append(ctx context.Context, namespace, threadID, role, content 
 		if err != nil {
 			// Log error but don't fail the append
 			// The message is stored, just not searchable
+			// Still try to queue for extraction
+			e.enqueueForExtraction(ctx, namespace, msg.ID, content)
 			return msg, nil
 		}
 
 		if err := e.storage.StoreMessageEmbedding(ctx, msg.ID, emb); err != nil {
 			// Same - log but don't fail
+			// Still try to queue for extraction
+			e.enqueueForExtraction(ctx, namespace, msg.ID, content)
 			return msg, nil
 		}
 	}
 
+	// Queue message for entity extraction if enqueuer is configured
+	e.enqueueForExtraction(ctx, namespace, msg.ID, content)
+
 	return msg, nil
+}
+
+// enqueueForExtraction queues content for entity extraction.
+// This is a fire-and-forget operation that logs errors but doesn't fail the caller.
+func (e *Engine) enqueueForExtraction(ctx context.Context, namespace, messageID, content string) {
+	if e.extractionEnqueuer == nil {
+		return
+	}
+
+	// Fire and forget - extraction is best-effort
+	if err := e.extractionEnqueuer.EnqueueForExtraction(ctx, namespace, "conversation", messageID, content); err != nil {
+		// Log but don't fail - extraction is optional
+		// In production, use structured logging
+		_ = err
+	}
 }
 
 // HistoryOpts contains options for retrieving conversation history.

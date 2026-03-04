@@ -364,6 +364,29 @@ func (s *Server) registerContextTools() {
 		),
 	)
 	s.mcp.AddTool(listTool, s.handleContextList)
+
+	// context_history
+	historyTool := mcp.NewTool("context_history",
+		mcp.WithDescription("Get version history of a workflow context key. Returns all previous values with timestamps."),
+		mcp.WithString("namespace",
+			mcp.Required(),
+			mcp.Description("Isolation scope"),
+		),
+		mcp.WithString("key",
+			mcp.Required(),
+			mcp.Description("Context key"),
+		),
+		mcp.WithString("run_id",
+			mcp.Description("Scope to a specific run (omit for persistent context)"),
+		),
+		mcp.WithString("cursor",
+			mcp.Description("Pagination cursor from previous response (optional)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Max results per page (default: 50)"),
+		),
+	)
+	s.mcp.AddTool(historyTool, s.handleContextHistory)
 }
 
 // registerEntityTools registers entity memory tools.
@@ -935,6 +958,39 @@ func (s *Server) handleContextList(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	result, err := s.context.List(ctx, namespace, opts)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
+}
+
+func (s *Server) handleContextHistory(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	namespace, err := req.RequireString("namespace")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := s.checkNamespace(namespace); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	key, err := req.RequireString("key")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	opts := &ctxengine.HistoryOpts{}
+	if runID, ok := req.GetArguments()["run_id"].(string); ok {
+		opts.RunID = &runID
+	}
+	if cursor, ok := req.GetArguments()["cursor"].(string); ok {
+		opts.Cursor = cursor
+	}
+	if limit, ok := req.GetArguments()["limit"].(float64); ok {
+		opts.Limit = int(limit)
+	}
+
+	result, err := s.context.History(ctx, namespace, key, opts)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

@@ -554,6 +554,78 @@ func TestContextList(t *testing.T) {
 	}
 }
 
+func TestContextHistory(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Set a context value multiple times to create history
+	for i := 1; i <= 3; i++ {
+		setReq := makeToolRequest("context_set", map[string]any{
+			"namespace": "test-ns",
+			"key":       "versioned-key",
+			"value":     map[string]any{"version": i},
+		})
+		_, err := srv.handleContextSet(ctx, setReq)
+		if err != nil {
+			t.Fatalf("failed to set context: %v", err)
+		}
+	}
+
+	// Get history
+	historyReq := makeToolRequest("context_history", map[string]any{
+		"namespace": "test-ns",
+		"key":       "versioned-key",
+	})
+
+	historyResult, err := srv.handleContextHistory(ctx, historyReq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if historyResult.IsError {
+		t.Errorf("unexpected tool error: %v", getTextContent(historyResult))
+	}
+
+	// Verify result contains history
+	content := getTextContent(historyResult)
+	if content == "" {
+		t.Error("expected non-empty history result")
+	}
+}
+
+func TestContextHistoryWithRunID(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Set context values with run_id
+	for i := 1; i <= 2; i++ {
+		setReq := makeToolRequest("context_set", map[string]any{
+			"namespace": "test-ns",
+			"key":       "run-scoped-key",
+			"value":     map[string]any{"iteration": i},
+			"run_id":    "run-123",
+		})
+		_, err := srv.handleContextSet(ctx, setReq)
+		if err != nil {
+			t.Fatalf("failed to set context: %v", err)
+		}
+	}
+
+	// Get history for specific run
+	historyReq := makeToolRequest("context_history", map[string]any{
+		"namespace": "test-ns",
+		"key":       "run-scoped-key",
+		"run_id":    "run-123",
+	})
+
+	historyResult, err := srv.handleContextHistory(ctx, historyReq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if historyResult.IsError {
+		t.Errorf("unexpected tool error: %v", getTextContent(historyResult))
+	}
+}
+
 func TestEntityQuery(t *testing.T) {
 	srv := testServer(t, "")
 	ctx := context.Background()

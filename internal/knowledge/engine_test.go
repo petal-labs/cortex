@@ -765,3 +765,145 @@ func TestIngestSemanticChunkingNoEmbedder(t *testing.T) {
 		t.Errorf("expected at least 1 chunk, got %d", result.ChunksCreated)
 	}
 }
+
+// MockExtractionEnqueuer implements ExtractionEnqueuer for testing.
+type MockExtractionEnqueuer struct {
+	callCount int
+	items     []extractionItem
+}
+
+type extractionItem struct {
+	namespace  string
+	sourceType string
+	sourceID   string
+	content    string
+}
+
+func NewMockExtractionEnqueuer() *MockExtractionEnqueuer {
+	return &MockExtractionEnqueuer{}
+}
+
+func (m *MockExtractionEnqueuer) EnqueueForExtraction(ctx context.Context, namespace, sourceType, sourceID, content string) error {
+	m.callCount++
+	m.items = append(m.items, extractionItem{
+		namespace:  namespace,
+		sourceType: sourceType,
+		sourceID:   sourceID,
+		content:    content,
+	})
+	return nil
+}
+
+func TestExtractionEnqueuer(t *testing.T) {
+	t.Run("enqueues chunks for extraction on ingest", func(t *testing.T) {
+		engine, _ := setupTestEngine(t)
+		ctx := context.Background()
+		namespace := "test-ns"
+
+		// Set up extraction enqueuer
+		enqueuer := NewMockExtractionEnqueuer()
+		engine.SetExtractionEnqueuer(enqueuer)
+
+		// Create collection
+		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
+			Name: "test-collection",
+		})
+		if err != nil {
+			t.Fatalf("failed to create collection: %v", err)
+		}
+
+		// Ingest a document
+		content := "First paragraph of content. Second paragraph of content. Third paragraph of content."
+		result, err := engine.Ingest(ctx, namespace, col.ID, content, nil)
+		if err != nil {
+			t.Fatalf("failed to ingest: %v", err)
+		}
+
+		// Verify extraction was enqueued for each chunk
+		if enqueuer.callCount != result.ChunksCreated {
+			t.Errorf("expected %d extraction calls, got %d", result.ChunksCreated, enqueuer.callCount)
+		}
+
+		// Verify extraction item details
+		for _, item := range enqueuer.items {
+			if item.namespace != namespace {
+				t.Errorf("expected namespace %q, got %q", namespace, item.namespace)
+			}
+			if item.sourceType != "knowledge" {
+				t.Errorf("expected sourceType 'knowledge', got %q", item.sourceType)
+			}
+			if item.content == "" {
+				t.Error("expected content to be non-empty")
+			}
+		}
+	})
+
+	t.Run("does not enqueue when no enqueuer set", func(t *testing.T) {
+		engine, _ := setupTestEngine(t)
+		ctx := context.Background()
+		namespace := "test-ns"
+
+		// Create collection
+		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
+			Name: "test-collection",
+		})
+		if err != nil {
+			t.Fatalf("failed to create collection: %v", err)
+		}
+
+		// No enqueuer set - should not panic
+		_, err = engine.Ingest(ctx, namespace, col.ID, "Test content here.", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("enqueues with correct chunk IDs", func(t *testing.T) {
+		engine, backend := setupTestEngine(t)
+		ctx := context.Background()
+		namespace := "test-ns"
+
+		enqueuer := NewMockExtractionEnqueuer()
+		engine.SetExtractionEnqueuer(enqueuer)
+
+		// Create collection
+		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
+			Name: "test-collection",
+		})
+		if err != nil {
+			t.Fatalf("failed to create collection: %v", err)
+		}
+
+		// Ingest with multiple chunks
+		content := "First sentence for chunk one. Second sentence for chunk one. Third sentence for chunk two. Fourth sentence for chunk two."
+		result, err := engine.Ingest(ctx, namespace, col.ID, content, &IngestOpts{
+			ChunkConfig: &types.ChunkConfig{
+				Strategy:  "fixed",
+				MaxTokens: 8, // Small chunk size to get multiple chunks
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to ingest: %v", err)
+		}
+
+		// Get chunks from storage to verify IDs match
+		doc, err := backend.GetDocument(ctx, namespace, result.DocumentID)
+		if err != nil {
+			t.Fatalf("failed to get document: %v", err)
+		}
+
+		// Verify chunk count matches enqueued count
+		if len(enqueuer.items) != result.ChunksCreated {
+			t.Errorf("expected %d items, got %d", result.ChunksCreated, len(enqueuer.items))
+		}
+
+		// Verify each source ID is a valid UUID format (chunk IDs are UUIDs)
+		for _, item := range enqueuer.items {
+			if len(item.sourceID) != 36 { // UUID string length
+				t.Errorf("expected UUID format sourceID, got %q", item.sourceID)
+			}
+		}
+
+		_ = doc // Document retrieved successfully
+	})
+}

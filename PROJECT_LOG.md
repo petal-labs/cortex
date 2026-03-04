@@ -285,7 +285,7 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/knowledge/semantic_chunker.go` - Semantic chunker implementation
 - `internal/knowledge/semantic_chunker_test.go` - Semantic chunker tests
 
-**Milestone 2.3 In Progress:**
+**Milestone 2.3 Completed:**
 - Entity extraction client implemented
   - LLM-powered entity extraction via Iris completion API
   - JSON response parsing with validation
@@ -300,15 +300,54 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - Batch processing with retry and exponential backoff
   - Support for extraction modes: off, sampled, whitelist, full
   - ProcessSingle for on-demand extraction
-- Full test coverage (25+ new tests)
+  - ExtractionEnqueuerAdapter for bridging engine interfaces
+- Extraction hooks added to engines
+  - Conversation engine queues messages for extraction on append
+  - Knowledge engine queues chunks for extraction on ingest
+  - Fire-and-forget pattern - extraction failures don't block operations
+- Serve command wiring
+  - Creates extractor, resolver, queue processor when Iris configured
+  - Sets extraction enqueuer on conversation and knowledge engines
+  - Starts queue processor in background
+- Full test coverage (35+ new tests)
 
 **New Files:**
 - `internal/entity/extractor.go` - Entity extraction client
 - `internal/entity/extractor_test.go` - Extractor tests
 - `internal/entity/resolver.go` - Name resolution with blocking/fuzzy
 - `internal/entity/resolver_test.go` - Resolver tests
-- `internal/entity/queue.go` - Queue processor
+- `internal/entity/queue.go` - Queue processor with enqueuer adapter
 - `internal/entity/queue_test.go` - Queue processor tests
+
+**Milestone 2.4 Completed:**
+- Context version history MCP handler implemented
+  - `context_history` tool returns version history for a key
+  - Supports run_id scoping, cursor pagination, and limit
+- Version conflict detection already in place
+  - `expected_version` parameter on context_set and context_merge
+  - Returns version conflict error on mismatch
+- Full test coverage (2 new tests)
+
+**Modified Files:**
+- `internal/server/mcp.go` - Added context_history tool and handler
+- `internal/server/mcp_test.go` - Added context history tests
+
+**Milestone 2.5 Completed:**
+- CLI Management Commands implemented for all memory primitives
+- Knowledge CLI: ingest, ingest-dir, search, stats, collections, create-collection
+- Conversation CLI: history, append, search, list, clear, summarize
+- Context CLI: get, set, delete, list, history, cleanup
+- Entity CLI: create, get, delete, list, search, add-alias, add-relationship, merge, queue-stats
+- Namespace CLI: stats, delete (with confirmation)
+- All commands support --namespace flag for isolation
+- JSON output support where applicable
+
+**New Files:**
+- `internal/cmd/knowledge.go` - Knowledge store CLI commands
+- `internal/cmd/conversation.go` - Conversation memory CLI commands
+- `internal/cmd/context.go` - Workflow context CLI commands
+- `internal/cmd/entity.go` - Entity memory CLI commands
+- `internal/cmd/namespace.go` - Namespace management CLI commands
 
 ---
 
@@ -328,10 +367,10 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 ### Phase 2: Advanced Features
 - [x] Conversation Summarization
 - [x] Semantic Chunking
-- [ ] Context Version History
-- [ ] Entity Extraction Pipeline
-- [ ] Embedding Cache
-- [ ] CLI Commands
+- [x] Entity Extraction Pipeline
+- [x] Context Version History
+- [x] CLI Commands
+- [ ] Embedding Cache (deferred - already have basic LRU cache)
 
 ### Phase 3: Production Hardening
 - [ ] pgvector Backend

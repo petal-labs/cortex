@@ -47,6 +47,23 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - AppendMessage, GetMessages, ListThreads, GetThread
   - UpdateThread, DeleteThread, StoreMessageEmbedding
   - MarkMessagesSummarized
+- Knowledge storage implemented with full test coverage
+  - CreateCollection, GetCollection, ListCollections, DeleteCollection
+  - InsertDocument, GetDocument, DeleteDocument
+  - InsertChunks (batch with embeddings), GetAdjacentChunks
+  - CollectionStats, SearchChunks (placeholder for vec0)
+- Context storage implemented with full test coverage
+  - GetContext, SetContext (with optimistic concurrency)
+  - ListContextKeys (with prefix filtering), DeleteContext
+  - GetContextHistory (version audit trail)
+  - CleanupExpiredContext, CleanupRunContext
+- Entity storage implemented with full test coverage
+  - UpsertEntity, GetEntityByID, GetEntityByName, ResolveAlias
+  - ListEntities (with type filter and sorting), DeleteEntity
+  - InsertMention, GetMentions, MergeEntities
+  - UpsertRelationship, GetRelationships, RegisterAlias
+  - StoreEntityEmbedding, SearchEntities (placeholder for vec0)
+  - EnqueueExtraction, DequeueExtraction, CompleteExtraction, GetExtractionQueueStats
 
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
@@ -61,6 +78,12 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/storage/sqlite/migrations.go` - Schema migrations
 - `internal/storage/sqlite/conversation.go` - Conversation storage ops
 - `internal/storage/sqlite/conversation_test.go` - Conversation tests
+- `internal/storage/sqlite/knowledge.go` - Knowledge storage ops
+- `internal/storage/sqlite/knowledge_test.go` - Knowledge tests
+- `internal/storage/sqlite/context.go` - Context storage ops
+- `internal/storage/sqlite/context_test.go` - Context tests
+- `internal/storage/sqlite/entity.go` - Entity storage ops
+- `internal/storage/sqlite/entity_test.go` - Entity tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---

@@ -92,6 +92,19 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - Stats and clear operations for monitoring
 - Full test coverage with mock server tests
 
+**Milestone 1.4 Completed:**
+- Conversation engine implemented with all core operations
+  - Append: message creation with auto thread creation, content truncation, embedding generation
+  - History: retrieve messages with cursor pagination, optional summary
+  - Search: semantic search across messages using embeddings
+  - Clear: delete thread and all messages
+  - ListThreads: paginated thread listing
+  - GetThread/UpdateThread: thread metadata management
+  - MarkSummarized: track summarized messages
+- Role validation (user, assistant, system, tool)
+- Config-driven semantic search (can be disabled)
+- Full test coverage (12 tests)
+
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
 - `.project/TASK_CHECKLIST.md` - Quick-reference checklist
@@ -116,6 +129,8 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/embedding/iris.go` - Iris HTTP client implementation
 - `internal/embedding/cache.go` - LRU embedding cache
 - `internal/embedding/provider_test.go` - Embedding tests
+- `internal/conversation/engine.go` - Conversation memory engine
+- `internal/conversation/engine_test.go` - Conversation engine tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---

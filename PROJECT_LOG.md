@@ -1,0 +1,106 @@
+# Cortex Project Log
+
+## Project Overview
+**Name:** Cortex - PetalFlow Memory & Knowledge Service
+**Type:** Go service (MCP server)
+**Created:** 2026-03-04
+**Status:** Planning Phase
+
+## Purpose
+Cortex provides persistent context, vector-backed knowledge retrieval, and conversation memory for PetalFlow agents. It implements four memory primitives:
+1. Conversation Memory - Agent dialogue history
+2. Knowledge Store - Vector-indexed documents (RAG)
+3. Workflow Context - Shared state across tasks/runs
+4. Entity Memory - Auto-extracted knowledge graph
+
+## Technical Stack
+- **Language:** Go
+- **Storage:** SQLite + vec0 (default), PostgreSQL + pgvector (production)
+- **Protocol:** MCP (Model Context Protocol)
+- **Embeddings:** Via Iris service
+
+## FRD Location
+`.project/petalflow-cortex-frd.md`
+
+---
+
+## Session Log
+
+### 2026-03-04 - Initial Planning & Phase 1 Start
+- Read FRD document (2182 lines)
+- Created detailed implementation plan (88 tasks across 4 phases)
+- Created task checklist for tracking progress
+- Project initialized
+
+**Milestone 1.1 Completed:**
+- Go module initialized
+- Directory structure created
+- Core dependencies added (cobra, viper, zap, uuid, sqlite3, pgx)
+- Configuration system implemented with tests
+- Shared type definitions created for all 4 memory primitives
+
+**Milestone 1.2 In Progress:**
+- Storage backend interface defined
+- SQLite backend scaffold created
+- Schema migrations implemented (all 15 tables)
+- Conversation storage implemented with full test coverage
+  - AppendMessage, GetMessages, ListThreads, GetThread
+  - UpdateThread, DeleteThread, StoreMessageEmbedding
+  - MarkMessagesSummarized
+
+**Files Created:**
+- `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
+- `.project/TASK_CHECKLIST.md` - Quick-reference checklist
+- `go.mod`, `go.sum` - Go module
+- `cmd/cortex/main.go` - CLI entrypoint
+- `internal/cmd/root.go` - Cobra root command
+- `internal/config/config.go` - Configuration system
+- `internal/config/config_test.go` - Config tests
+- `internal/storage/backend.go` - Storage interface
+- `internal/storage/sqlite/sqlite.go` - SQLite backend
+- `internal/storage/sqlite/migrations.go` - Schema migrations
+- `internal/storage/sqlite/conversation.go` - Conversation storage ops
+- `internal/storage/sqlite/conversation_test.go` - Conversation tests
+- `pkg/types/*.go` - Shared type definitions
+
+---
+
+## Implementation Status
+
+### Phase 1: Foundation
+- [ ] Project Structure & Go Module
+- [ ] Storage Interface & SQLite Backend
+- [ ] Embedding Provider (Iris Integration)
+- [ ] Conversation Memory Engine
+- [ ] Knowledge Store Engine
+- [ ] Workflow Context Engine
+- [ ] Entity Memory Engine
+- [ ] MCP Server
+
+### Phase 2: Advanced Features
+- [ ] Conversation Summarization
+- [ ] Semantic Chunking
+- [ ] Context Version History
+- [ ] Entity Extraction Pipeline
+- [ ] Embedding Cache
+- [ ] CLI Commands
+
+### Phase 3: Production Hardening
+- [ ] pgvector Backend
+- [ ] SSE Transport
+- [ ] Prometheus Metrics
+- [ ] Retention Policies
+
+### Phase 4: Ecosystem Integration
+- [ ] Hybrid Search
+- [ ] Bulk Ingest
+- [ ] PetalFlow UI Integration
+
+---
+
+## Known Issues
+None yet.
+
+## Notes
+- Project follows the Cortex FRD specification exactly
+- Each phase has verification tests before moving forward

@@ -56,5 +56,5 @@ tmp/
 temp/
 
 # agent files
-.project
+.project/
 

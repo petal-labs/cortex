@@ -135,6 +135,37 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
   - deep_merge: recursive map merging with array strategy options
 - Full test coverage (31 tests)
 
+**Milestone 1.7 Completed:**
+- Entity memory engine implemented with all core operations
+  - Create/Get/Update/Delete: full CRUD with validation
+  - GetByName: lookup by canonical name
+  - Resolve: name-or-alias resolution (tries canonical name first, then aliases)
+  - List: paginated listing with optional type filter
+  - Search: semantic search across entity summaries using embeddings
+- Alias management implemented
+  - AddAlias: register alternative names for entities
+  - Resolution prioritizes canonical name over aliases
+- Relationship management implemented
+  - AddRelationship: create typed relationships between entities
+  - GetRelationships: retrieve relationships with direction filtering
+  - Supports bidirectional and unidirectional relationships
+- Mention tracking implemented
+  - RecordMention: track entity mentions with source references
+  - GetMentions: retrieve mentions with pagination
+  - Automatic mention count tracking on entities
+- Entity merging implemented
+  - Merge: combine two entities, preserving aliases and relationships
+  - Automatic alias creation from source entity name
+  - Attribute/metadata merging from both entities
+- Extraction queue implemented
+  - EnqueueExtraction: add messages for entity extraction processing
+  - DequeueExtraction: retrieve next pending item for processing
+  - CompleteExtraction: mark items as processed (completed/failed)
+  - Stats: queue metrics for monitoring
+- Query operation for combined entity retrieval
+  - Returns entity with relationships and recent mentions in single call
+- Full test coverage (28 tests)
+
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
 - `.project/TASK_CHECKLIST.md` - Quick-reference checklist
@@ -167,6 +198,8 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/knowledge/engine_test.go` - Knowledge engine tests
 - `internal/context/engine.go` - Workflow context engine
 - `internal/context/engine_test.go` - Context engine tests
+- `internal/entity/engine.go` - Entity memory engine
+- `internal/entity/engine_test.go` - Entity engine tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---
@@ -180,7 +213,7 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - [x] Conversation Memory Engine
 - [x] Knowledge Store Engine
 - [x] Workflow Context Engine
-- [ ] Entity Memory Engine
+- [x] Entity Memory Engine
 - [ ] MCP Server
 
 ### Phase 2: Advanced Features

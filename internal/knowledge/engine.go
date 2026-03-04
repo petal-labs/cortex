@@ -27,10 +27,11 @@ var (
 // Engine implements the knowledge store logic layer.
 // It orchestrates chunking, embedding, and storage operations.
 type Engine struct {
-	storage   storage.Backend
-	embedding embedding.Provider
-	chunker   Chunker
-	cfg       *config.KnowledgeConfig
+	storage          storage.Backend
+	embedding        embedding.Provider
+	chunker          Chunker
+	semanticChunker  *SemanticChunker
+	cfg              *config.KnowledgeConfig
 }
 
 // NewEngine creates a new knowledge engine.
@@ -44,12 +45,19 @@ func NewEngine(store storage.Backend, emb embedding.Provider, cfg *config.Knowle
 		cfg = &defaultCfg.Knowledge
 	}
 
-	return &Engine{
+	e := &Engine{
 		storage:   store,
 		embedding: emb,
 		chunker:   NewChunker(),
 		cfg:       cfg,
-	}, nil
+	}
+
+	// Initialize semantic chunker if embedding provider is available
+	if emb != nil {
+		e.semanticChunker = NewSemanticChunker(emb)
+	}
+
+	return e, nil
 }
 
 // IngestOpts contains options for document ingestion.
@@ -120,7 +128,22 @@ func (e *Engine) Ingest(ctx context.Context, namespace, collectionID, content st
 	}
 
 	// Chunk content
-	chunkOutputs := e.chunker.Chunk(content, chunkConfig)
+	var chunkOutputs []ChunkOutput
+	if chunkConfig.Strategy == string(ChunkStrategySemantic) && e.semanticChunker != nil {
+		// Use semantic chunker for embedding-based chunking
+		var err error
+		chunkOutputs, err = e.semanticChunker.Chunk(ctx, content, chunkConfig)
+		if err != nil {
+			// Fall back to sentence chunking on semantic chunking failure
+			chunkOutputs = e.chunker.Chunk(content, types.ChunkConfig{
+				Strategy:  string(ChunkStrategySentence),
+				MaxTokens: chunkConfig.MaxTokens,
+				Overlap:   chunkConfig.Overlap,
+			})
+		}
+	} else {
+		chunkOutputs = e.chunker.Chunk(content, chunkConfig)
+	}
 	if len(chunkOutputs) == 0 {
 		// Document stored but no chunks created (empty after processing)
 		return &IngestResult{

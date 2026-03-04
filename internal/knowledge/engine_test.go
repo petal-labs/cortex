@@ -643,3 +643,125 @@ func TestJoinChunks(t *testing.T) {
 		}
 	}
 }
+
+func TestIngestSemanticChunking(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	// Content with clear topic separation for semantic chunking
+	content := `Machine learning is a subset of artificial intelligence. Neural networks power deep learning systems. ML models learn from data to make predictions.
+
+The weather today is sunny and warm. Tomorrow will bring rain and cooler temperatures. The forecast shows clouds throughout the week. Weekend weather looks favorable for outdoor activities.`
+
+	result, err := engine.Ingest(ctx, namespace, col.ID, content, &IngestOpts{
+		Title: "Semantic Chunking Test",
+		ChunkConfig: &types.ChunkConfig{
+			Strategy:  "semantic",
+			MaxTokens: 100,
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("failed to ingest with semantic chunking: %v", err)
+	}
+
+	// Should have created chunks
+	if result.ChunksCreated < 1 {
+		t.Errorf("expected at least 1 chunk, got %d", result.ChunksCreated)
+	}
+
+	// Verify document was stored
+	doc, err := engine.GetDocument(ctx, namespace, result.DocumentID)
+	if err != nil {
+		t.Fatalf("failed to get document: %v", err)
+	}
+
+	if doc.Title != "Semantic Chunking Test" {
+		t.Errorf("expected title 'Semantic Chunking Test', got %s", doc.Title)
+	}
+}
+
+func TestIngestSemanticChunkingFallback(t *testing.T) {
+	// Test that semantic chunking falls back to sentence chunking
+	// when content is too short for semantic analysis
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	// Short content that can't be semantically chunked (fewer sentences than 2*windowSize)
+	content := "This is a short sentence. Here is another one."
+
+	result, err := engine.Ingest(ctx, namespace, col.ID, content, &IngestOpts{
+		ChunkConfig: &types.ChunkConfig{
+			Strategy:  "semantic",
+			MaxTokens: 100,
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("failed to ingest: %v", err)
+	}
+
+	// Should still create chunks via fallback
+	if result.ChunksCreated < 1 {
+		t.Errorf("expected at least 1 chunk from fallback, got %d", result.ChunksCreated)
+	}
+}
+
+func TestIngestSemanticChunkingNoEmbedder(t *testing.T) {
+	// Test that semantic chunking falls back when no embedding provider is available
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	backend := sqlite.NewWithDB(db)
+	if err := backend.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+
+	// Create engine WITHOUT embedding provider
+	cfg := config.DefaultConfig()
+	engine, err := NewEngine(backend, nil, &cfg.Knowledge)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	ctx := context.Background()
+	namespace := "test-ns"
+
+	// Create collection first
+	col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
+		Name: "test-collection",
+	})
+	if err != nil {
+		t.Fatalf("failed to create collection: %v", err)
+	}
+
+	// Try to ingest with semantic strategy - should fall back
+	content := "First sentence here. Second sentence follows. Third sentence continues. Fourth sentence ends. Fifth sentence extra. Sixth sentence more."
+
+	result, err := engine.Ingest(ctx, namespace, col.ID, content, &IngestOpts{
+		ChunkConfig: &types.ChunkConfig{
+			Strategy:  "semantic",
+			MaxTokens: 100,
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("failed to ingest: %v", err)
+	}
+
+	// Should still create chunks using the default chunker (not semantic)
+	if result.ChunksCreated < 1 {
+		t.Errorf("expected at least 1 chunk, got %d", result.ChunksCreated)
+	}
+}

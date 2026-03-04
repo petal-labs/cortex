@@ -268,6 +268,23 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/summarization/client.go` - LLM completion client
 - `internal/summarization/client_test.go` - Client tests
 
+**Milestone 2.2 Completed:**
+- Semantic chunking implemented with embedding-based topic detection
+  - SemanticChunker uses sliding windows of sentences
+  - Embeds each window and computes cosine similarity between adjacent windows
+  - Detects breakpoints where similarity drops below threshold
+  - Configurable via WithSimilarityThreshold() and WithWindowSize()
+  - Falls back to sentence chunking for short content or embedding failures
+- Integrated with knowledge engine
+  - Engine dispatches to SemanticChunker when strategy is "semantic"
+  - Graceful fallback to sentence chunking on errors
+  - Semantic chunker only initialized when embedding provider is available
+- Full test coverage (15+ new tests)
+
+**New Files:**
+- `internal/knowledge/semantic_chunker.go` - Semantic chunker implementation
+- `internal/knowledge/semantic_chunker_test.go` - Semantic chunker tests
+
 ---
 
 ## Implementation Status
@@ -285,7 +302,7 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 
 ### Phase 2: Advanced Features
 - [x] Conversation Summarization
-- [ ] Semantic Chunking
+- [x] Semantic Chunking
 - [ ] Context Version History
 - [ ] Entity Extraction Pipeline
 - [ ] Embedding Cache

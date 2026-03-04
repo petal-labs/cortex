@@ -14,6 +14,7 @@ const (
 	ChunkStrategyFixed     ChunkStrategy = "fixed"
 	ChunkStrategySentence  ChunkStrategy = "sentence"
 	ChunkStrategyParagraph ChunkStrategy = "paragraph"
+	ChunkStrategySemantic  ChunkStrategy = "semantic"
 )
 
 // Chunker splits text into chunks for indexing.

@@ -119,6 +119,22 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - Graceful degradation when embeddings fail
 - Full test coverage (44 tests across chunker and engine)
 
+**Milestone 1.6 Completed:**
+- Workflow context engine implemented with all core operations
+  - Get/Set: key-value storage with version tracking
+  - Optimistic concurrency control via expected version
+  - TTL support with automatic expiration
+  - Run-scoped vs persistent context separation
+  - Key listing with prefix filtering and pagination
+  - Version history retrieval
+- Merge operations with multiple strategies
+  - replace: simple value replacement
+  - append: array concatenation
+  - max/min: numeric comparison
+  - sum: numeric accumulation
+  - deep_merge: recursive map merging with array strategy options
+- Full test coverage (31 tests)
+
 **Files Created:**
 - `.project/IMPLEMENTATION_PLAN.md` - Detailed plan with task descriptions
 - `.project/TASK_CHECKLIST.md` - Quick-reference checklist
@@ -149,6 +165,8 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/knowledge/chunker_test.go` - Chunker tests
 - `internal/knowledge/engine.go` - Knowledge store engine
 - `internal/knowledge/engine_test.go` - Knowledge engine tests
+- `internal/context/engine.go` - Workflow context engine
+- `internal/context/engine_test.go` - Context engine tests
 - `pkg/types/*.go` - Shared type definitions
 
 ---
@@ -161,7 +179,7 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - [x] Embedding Provider (Iris Integration)
 - [x] Conversation Memory Engine
 - [x] Knowledge Store Engine
-- [ ] Workflow Context Engine
+- [x] Workflow Context Engine
 - [ ] Entity Memory Engine
 - [ ] MCP Server
 

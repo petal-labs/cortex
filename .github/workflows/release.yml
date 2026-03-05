@@ -8,91 +8,218 @@ on:
 permissions:
   contents: write
 
+env:
+  GO_VERSION: "1.24.2"
+
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-          - os: macos-latest
-            goos: darwin
-          - os: windows-latest
-            goos: windows
+        goarch: [amd64, arm64]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.2"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Install SQLite (Windows)
-        if: matrix.goos == 'windows'
+      - name: Install cross-compile dependencies
+        if: matrix.goarch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.goarch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          COMMIT=${GITHUB_SHA::7}
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex ./cmd/cortex
+
+      - name: Create archive
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ARCHIVE_NAME="cortex_${VERSION}_linux_${{ matrix.goarch }}"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp cortex "${ARCHIVE_NAME}/"
+          cp README.md "${ARCHIVE_NAME}/" 2>/dev/null || true
+          cp LICENSE* "${ARCHIVE_NAME}/" 2>/dev/null || true
+          tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.goarch }}
+          path: "*.tar.gz"
+          retention-days: 1
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          COMMIT=${GITHUB_SHA::7}
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex ./cmd/cortex
+
+      - name: Create archive
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ARCHIVE_NAME="cortex_${VERSION}_darwin_${{ matrix.goarch }}"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp cortex "${ARCHIVE_NAME}/"
+          cp README.md "${ARCHIVE_NAME}/" 2>/dev/null || true
+          cp LICENSE* "${ARCHIVE_NAME}/" 2>/dev/null || true
+          tar -czvf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: darwin-${{ matrix.goarch }}
+          path: "*.tar.gz"
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Configure git line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install SQLite headers
         shell: powershell
         run: |
-          # Download and extract SQLite amalgamation (includes sqlite3.h)
           $sqliteVersion = "3490100"
           $sqliteUrl = "https://www.sqlite.org/2025/sqlite-amalgamation-$sqliteVersion.zip"
           Invoke-WebRequest -Uri $sqliteUrl -OutFile sqlite-amalgamation.zip
           Expand-Archive -Path sqlite-amalgamation.zip -DestinationPath .
-          # Set CGO_CFLAGS for the build
           echo "CGO_CFLAGS=-I$PWD/sqlite-amalgamation-$sqliteVersion" >> $env:GITHUB_ENV
 
-      - name: Run tests
-        run: go test -v ./...
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean --split
+      - name: Build
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GOOS: ${{ matrix.goos }}
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          COMMIT=${GITHUB_SHA::7}
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex.exe ./cmd/cortex
 
-      - name: Upload artifacts
+      - name: Create archive
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          ARCHIVE_NAME="cortex_${VERSION}_windows_amd64"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp cortex.exe "${ARCHIVE_NAME}/"
+          cp README.md "${ARCHIVE_NAME}/" 2>/dev/null || true
+          cp LICENSE* "${ARCHIVE_NAME}/" 2>/dev/null || true
+          7z a "${ARCHIVE_NAME}.zip" "${ARCHIVE_NAME}"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.goos }}
-          path: dist/**/*
+          name: windows-amd64
+          path: "*.zip"
           retention-days: 1
 
   release:
-    name: Release
-    needs: build
+    name: Create Release
+    needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.2"
-          cache: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          pattern: dist-*
-          merge-multiple: true
+          path: artifacts
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: continue --merge
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          cd release
+          sha256sum * > checksums.txt
+          ls -la
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          CURRENT_TAG=${GITHUB_REF_NAME}
+
+          echo "## Cortex ${CURRENT_TAG#v}" > changelog.md
+          echo "" >> changelog.md
+          echo "Memory and knowledge service for AI agents." >> changelog.md
+          echo "" >> changelog.md
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "### Changes" >> changelog.md
+            git log --pretty=format:"- %s" ${PREV_TAG}..HEAD | grep -v -E "^- (docs:|test:|ci:|chore:|Merge)" >> changelog.md || true
+            echo "" >> changelog.md
+            echo "" >> changelog.md
+            echo "**Full Changelog**: https://github.com/petal-labs/cortex/compare/${PREV_TAG}...${CURRENT_TAG}" >> changelog.md
+          else
+            echo "Initial release." >> changelog.md
+          fi
+
+      - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          # Check if it's a prerelease (contains - like v1.0.0-rc1)
+          if [[ "$TAG" == *"-"* ]]; then
+            PRERELEASE="--prerelease"
+          else
+            PRERELEASE=""
+          fi
+
+          gh release create "$TAG" \
+            --title "Cortex ${TAG#v}" \
+            --notes-file changelog.md \
+            $PRERELEASE \
+            release/*

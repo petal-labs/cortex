@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 type MockEmbeddingProvider struct {
 	dimensions int
 	callCount  int
+	mu         sync.Mutex
 }
 
 func NewMockEmbeddingProvider(dimensions int) *MockEmbeddingProvider {
@@ -26,14 +28,18 @@ func NewMockEmbeddingProvider(dimensions int) *MockEmbeddingProvider {
 }
 
 func (m *MockEmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	m.mu.Lock()
 	m.callCount++
+	m.mu.Unlock()
 	return m.generateEmbedding(text), nil
 }
 
 func (m *MockEmbeddingProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	results := make([][]float32, len(texts))
 	for i, text := range texts {
+		m.mu.Lock()
 		m.callCount++
+		m.mu.Unlock()
 		results[i] = m.generateEmbedding(text)
 	}
 	return results, nil

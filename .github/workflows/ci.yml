@@ -22,6 +22,18 @@ jobs:
           go-version: "1.24.2"
           cache: true
 
+      - name: Install SQLite (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          # Download and extract SQLite amalgamation (includes sqlite3.h)
+          $sqliteVersion = "3490100"
+          $sqliteUrl = "https://www.sqlite.org/2025/sqlite-amalgamation-$sqliteVersion.zip"
+          Invoke-WebRequest -Uri $sqliteUrl -OutFile sqlite-amalgamation.zip
+          Expand-Archive -Path sqlite-amalgamation.zip -DestinationPath .
+          # Set CGO_CFLAGS for the build
+          echo "CGO_CFLAGS=-I$PWD/sqlite-amalgamation-$sqliteVersion" >> $env:GITHUB_ENV
+
       - name: Build
         run: go build ./...
 

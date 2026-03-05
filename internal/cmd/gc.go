@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/gc"
 	"github.com/petal-labs/cortex/internal/observability"
-	"github.com/spf13/cobra"
 )
 
 var (

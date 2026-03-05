@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/storage"
@@ -17,13 +18,13 @@ import (
 
 // Common errors returned by the entity engine.
 var (
-	ErrEntityNotFound     = errors.New("entity not found")
-	ErrEmptyName          = errors.New("entity name cannot be empty")
-	ErrInvalidType        = errors.New("invalid entity type")
-	ErrSelfMerge          = errors.New("cannot merge entity with itself")
-	ErrEmbeddingRequired  = errors.New("embedding provider required for search")
-	ErrEmptyQuery         = errors.New("search query cannot be empty")
-	ErrEmptySourceID      = errors.New("source ID is required")
+	ErrEntityNotFound    = errors.New("entity not found")
+	ErrEmptyName         = errors.New("entity name cannot be empty")
+	ErrInvalidType       = errors.New("invalid entity type")
+	ErrSelfMerge         = errors.New("cannot merge entity with itself")
+	ErrEmbeddingRequired = errors.New("embedding provider required for search")
+	ErrEmptyQuery        = errors.New("search query cannot be empty")
+	ErrEmptySourceID     = errors.New("source ID is required")
 )
 
 // ValidEntityTypes defines valid entity types.
@@ -259,7 +260,7 @@ func (e *Engine) Delete(ctx context.Context, namespace, entityID string) error {
 
 // ListOpts contains options for listing entities.
 type ListOpts struct {
-	EntityType *types.EntityType // Filter by type
+	EntityType *types.EntityType  // Filter by type
 	SortBy     types.EntitySortBy // Sort order
 	Cursor     string             // Pagination cursor
 	Limit      int                // Max results (0 = default)
@@ -586,7 +587,7 @@ func (e *Engine) AddRelationship(ctx context.Context, namespace, sourceID, targe
 
 // GetRelationshipsOpts contains options for retrieving relationships.
 type GetRelationshipsOpts struct {
-	RelationType *string                   // Filter by type
+	RelationType *string                     // Filter by type
 	Direction    types.RelationshipDirection // Direction filter
 }
 

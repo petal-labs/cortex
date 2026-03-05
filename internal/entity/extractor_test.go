@@ -145,7 +145,7 @@ func TestNormalizeExtractedEntity(t *testing.T) {
 			Name:       "  Test Entity  ",
 			Type:       "PERSON",
 			Aliases:    []string{"  Test  ", "Test Entity", "Test"}, // Duplicate and whitespace
-			Confidence: 1.5, // Out of range
+			Confidence: 1.5,                                         // Out of range
 		}
 
 		normalizeExtractedEntity(ent)

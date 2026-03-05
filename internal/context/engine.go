@@ -16,10 +16,10 @@ import (
 
 // Common errors returned by the context engine.
 var (
-	ErrKeyNotFound      = errors.New("context key not found")
-	ErrVersionConflict  = errors.New("version conflict")
-	ErrInvalidMerge     = errors.New("cannot merge incompatible types")
-	ErrEmptyKey         = errors.New("context key cannot be empty")
+	ErrKeyNotFound     = errors.New("context key not found")
+	ErrVersionConflict = errors.New("version conflict")
+	ErrInvalidMerge    = errors.New("cannot merge incompatible types")
+	ErrEmptyKey        = errors.New("context key cannot be empty")
 )
 
 // Engine implements the workflow context logic layer.
@@ -297,9 +297,9 @@ type HistoryOpts struct {
 
 // HistoryResult contains the result of a context history operation.
 type HistoryResult struct {
-	Key        string                    `json:"key"`
+	Key        string                       `json:"key"`
 	History    []*types.ContextHistoryEntry `json:"history"`
-	NextCursor string                    `json:"next_cursor,omitempty"`
+	NextCursor string                       `json:"next_cursor,omitempty"`
 }
 
 // History retrieves the version history for a key.

@@ -449,8 +449,8 @@ func TestKnowledgeBulkIngest(t *testing.T) {
 				"title":   "DB Optimization",
 			},
 			map[string]any{
-				"content": "Third document covering API design patterns and best practices.",
-				"title":   "API Design",
+				"content":  "Third document covering API design patterns and best practices.",
+				"title":    "API Design",
 				"metadata": map[string]any{"topic": "api"},
 			},
 		},

@@ -17,11 +17,11 @@ const (
 type Entity struct {
 	ID           string            `json:"id"`
 	Namespace    string            `json:"namespace"`
-	Name         string            `json:"name"`          // Canonical name
-	Type         EntityType        `json:"type"`          // "person", "organization", "product", "location", "concept"
-	Aliases      []string          `json:"aliases"`       // Alternative names, abbreviations
-	Summary      string            `json:"summary"`       // LLM-generated summary of everything known
-	Attributes   map[string]string `json:"attributes"`    // Structured facts (e.g., "role": "CEO", "founded": "2021")
+	Name         string            `json:"name"`       // Canonical name
+	Type         EntityType        `json:"type"`       // "person", "organization", "product", "location", "concept"
+	Aliases      []string          `json:"aliases"`    // Alternative names, abbreviations
+	Summary      string            `json:"summary"`    // LLM-generated summary of everything known
+	Attributes   map[string]string `json:"attributes"` // Structured facts (e.g., "role": "CEO", "founded": "2021")
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	MentionCount int64             `json:"mention_count"`
 	FirstSeenAt  time.Time         `json:"first_seen_at"`
@@ -101,13 +101,13 @@ type EntityRelationshipsResponse struct {
 
 // EntityRelationshipWithName includes the related entity name for display.
 type EntityRelationshipWithName struct {
-	RelatedEntity     string    `json:"related_entity"`
-	RelatedEntityType string    `json:"related_entity_type"`
-	RelationType      string    `json:"relation_type"`
-	Description       string    `json:"description"`
-	Direction         string    `json:"direction"` // "outgoing" or "incoming"
-	Confidence        float64   `json:"confidence"`
-	MentionCount      int64     `json:"mention_count"`
+	RelatedEntity     string  `json:"related_entity"`
+	RelatedEntityType string  `json:"related_entity_type"`
+	RelationType      string  `json:"relation_type"`
+	Description       string  `json:"description"`
+	Direction         string  `json:"direction"` // "outgoing" or "incoming"
+	Confidence        float64 `json:"confidence"`
+	MentionCount      int64   `json:"mention_count"`
 }
 
 // EntityUpdateResponse represents the response from entity.update.
@@ -140,23 +140,23 @@ type EntityListItem struct {
 
 // ExtractionQueueItem represents an item in the entity extraction queue.
 type ExtractionQueueItem struct {
-	ID          int64     `json:"id"`
-	Namespace   string    `json:"namespace"`
-	SourceType  string    `json:"source_type"` // "conversation", "knowledge"
-	SourceID    string    `json:"source_id"`
-	Content     string    `json:"content"`
-	Status      string    `json:"status"` // "pending", "processing", "completed", "failed", "dead_letter"
-	Attempts    int       `json:"attempts"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          int64      `json:"id"`
+	Namespace   string     `json:"namespace"`
+	SourceType  string     `json:"source_type"` // "conversation", "knowledge"
+	SourceID    string     `json:"source_id"`
+	Content     string     `json:"content"`
+	Status      string     `json:"status"` // "pending", "processing", "completed", "failed", "dead_letter"
+	Attempts    int        `json:"attempts"`
+	CreatedAt   time.Time  `json:"created_at"`
 	ProcessedAt *time.Time `json:"processed_at,omitempty"`
 }
 
 // ExtractedEntity represents an entity extracted by the LLM.
 type ExtractedEntity struct {
-	Name         string                 `json:"name"`
-	Type         EntityType             `json:"type"`
-	Aliases      []string               `json:"aliases,omitempty"`
-	Attributes   map[string]string      `json:"attributes,omitempty"`
+	Name          string                  `json:"name"`
+	Type          EntityType              `json:"type"`
+	Aliases       []string                `json:"aliases,omitempty"`
+	Attributes    map[string]string       `json:"attributes,omitempty"`
 	Relationships []ExtractedRelationship `json:"relationships,omitempty"`
 }
 

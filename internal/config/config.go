@@ -68,25 +68,25 @@ type KnowledgeConfig struct {
 
 // ContextConfig configures workflow context.
 type ContextConfig struct {
-	TTLCleanupInterval    time.Duration `mapstructure:"ttl_cleanup_interval"`
-	HistoryRetentionDays  int           `mapstructure:"history_retention_days"`
+	TTLCleanupInterval   time.Duration `mapstructure:"ttl_cleanup_interval"`
+	HistoryRetentionDays int           `mapstructure:"history_retention_days"`
 }
 
 // EntityConfig configures entity memory.
 type EntityConfig struct {
-	ExtractionMode               string   `mapstructure:"extraction_mode"` // "off", "sampled", "whitelist", "full"
-	ExtractionModel              string   `mapstructure:"extraction_model"`
-	ExtractionBatchSize          int      `mapstructure:"extraction_batch_size"`
+	ExtractionMode               string        `mapstructure:"extraction_mode"` // "off", "sampled", "whitelist", "full"
+	ExtractionModel              string        `mapstructure:"extraction_model"`
+	ExtractionBatchSize          int           `mapstructure:"extraction_batch_size"`
 	ExtractionInterval           time.Duration `mapstructure:"extraction_interval"`
-	SampleRate                   float64  `mapstructure:"sample_rate"`
-	WhitelistKeywords            []string `mapstructure:"whitelist_keywords"`
-	SummaryRegenerationThreshold int      `mapstructure:"summary_regeneration_threshold"`
-	MinConfidence                float64  `mapstructure:"min_confidence"`
-	MinMentionsToKeep            int      `mapstructure:"min_mentions_to_keep"`
-	AliasFuzzyThreshold          float64  `mapstructure:"alias_fuzzy_threshold"`
-	ExtractionMaxAttempts        int      `mapstructure:"extraction_max_attempts"`
-	ExtractionBackoff            string   `mapstructure:"extraction_backoff"` // "fixed", "exponential"
-	ExtractionDeadLetterPolicy   string   `mapstructure:"extraction_dead_letter_policy"` // "retain", "drop"
+	SampleRate                   float64       `mapstructure:"sample_rate"`
+	WhitelistKeywords            []string      `mapstructure:"whitelist_keywords"`
+	SummaryRegenerationThreshold int           `mapstructure:"summary_regeneration_threshold"`
+	MinConfidence                float64       `mapstructure:"min_confidence"`
+	MinMentionsToKeep            int           `mapstructure:"min_mentions_to_keep"`
+	AliasFuzzyThreshold          float64       `mapstructure:"alias_fuzzy_threshold"`
+	ExtractionMaxAttempts        int           `mapstructure:"extraction_max_attempts"`
+	ExtractionBackoff            string        `mapstructure:"extraction_backoff"`            // "fixed", "exponential"
+	ExtractionDeadLetterPolicy   string        `mapstructure:"extraction_dead_letter_policy"` // "retain", "drop"
 }
 
 // RetentionConfig configures data lifecycle.

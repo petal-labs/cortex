@@ -399,4 +399,3 @@ func TestHashText(t *testing.T) {
 		t.Errorf("expected 64 char hex string, got %d", len(hash1))
 	}
 }
-

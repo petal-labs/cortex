@@ -57,9 +57,9 @@ type ExtractedRelationship struct {
 
 // ExtractionResult contains the result of entity extraction.
 type ExtractionResult struct {
-	Entities      []ExtractedEntity      `json:"entities"`
+	Entities      []ExtractedEntity       `json:"entities"`
 	Relationships []ExtractedRelationship `json:"relationships,omitempty"`
-	SourceText    string                 `json:"-"` // Original text (not serialized)
+	SourceText    string                  `json:"-"` // Original text (not serialized)
 }
 
 // Extractor extracts entities from text using an LLM.

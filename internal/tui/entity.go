@@ -20,10 +20,10 @@ type EntityModel struct {
 	loaded   bool
 
 	// Detail view
-	showingDetail      bool
-	selectedEntity     *types.Entity
-	relationships      []*types.EntityRelationship
-	mentions           []*types.EntityMention
+	showingDetail  bool
+	selectedEntity *types.Entity
+	relationships  []*types.EntityRelationship
+	mentions       []*types.EntityMention
 }
 
 // NewEntityModel creates a new entity model

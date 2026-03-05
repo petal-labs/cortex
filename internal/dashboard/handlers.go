@@ -11,12 +11,12 @@ import (
 
 // PageData holds common data for all pages.
 type PageData struct {
-	Title       string
-	ActivePage  string
-	Namespace   string
-	Content     any
-	Error       string
-	IsHTMX      bool
+	Title      string
+	ActivePage string
+	Namespace  string
+	Content    any
+	Error      string
+	IsHTMX     bool
 }
 
 // handleHome serves the dashboard home page.

@@ -102,9 +102,9 @@ func TestListCollections(t *testing.T) {
 	baseTime := time.Now().Unix()
 	for i := 0; i < 5; i++ {
 		col := &types.Collection{
-			Namespace:   "test-ns",
-			Name:        "collection-" + string(rune('A'+i)),
-			CreatedAt:   time.Unix(baseTime+int64(i), 0),
+			Namespace: "test-ns",
+			Name:      "collection-" + string(rune('A'+i)),
+			CreatedAt: time.Unix(baseTime+int64(i), 0),
 		}
 		if err := backend.CreateCollection(ctx, col); err != nil {
 			t.Fatalf("failed to create collection %d: %v", i, err)

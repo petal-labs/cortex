@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/storage"
@@ -15,11 +16,11 @@ import (
 
 // Common errors returned by the conversation engine.
 var (
-	ErrEmptyContent        = errors.New("message content cannot be empty")
-	ErrInvalidRole         = errors.New("invalid message role")
-	ErrThreadNotFound      = errors.New("thread not found")
-	ErrNothingToSummarize  = errors.New("not enough messages to summarize")
-	ErrSummarizerNotSet    = errors.New("summarizer not configured")
+	ErrEmptyContent       = errors.New("message content cannot be empty")
+	ErrInvalidRole        = errors.New("invalid message role")
+	ErrThreadNotFound     = errors.New("thread not found")
+	ErrNothingToSummarize = errors.New("not enough messages to summarize")
+	ErrSummarizerNotSet   = errors.New("summarizer not configured")
 )
 
 // Summarizer generates summaries from conversation messages.
@@ -43,11 +44,11 @@ var ValidRoles = map[string]bool{
 // Engine implements the conversation memory logic layer.
 // It orchestrates storage and embedding operations for conversation management.
 type Engine struct {
-	storage             storage.Backend
-	embedding           embedding.Provider
-	summarizer          Summarizer
-	extractionEnqueuer  ExtractionEnqueuer
-	cfg                 *config.ConversationConfig
+	storage            storage.Backend
+	embedding          embedding.Provider
+	summarizer         Summarizer
+	extractionEnqueuer ExtractionEnqueuer
+	cfg                *config.ConversationConfig
 }
 
 // NewEngine creates a new conversation engine.
@@ -173,10 +174,10 @@ func (e *Engine) enqueueForExtraction(ctx context.Context, namespace, messageID,
 
 // HistoryOpts contains options for retrieving conversation history.
 type HistoryOpts struct {
-	LastN              int    // Number of recent messages to retrieve (0 = use default)
-	IncludeSummary     bool   // Prepend thread summary if available
-	Cursor             string // Pagination cursor
-	SkipAutoSummarize  bool   // Skip auto-summarization check (internal use)
+	LastN             int    // Number of recent messages to retrieve (0 = use default)
+	IncludeSummary    bool   // Prepend thread summary if available
+	Cursor            string // Pagination cursor
+	SkipAutoSummarize bool   // Skip auto-summarization check (internal use)
 }
 
 // HistoryResult contains the result of a history query.

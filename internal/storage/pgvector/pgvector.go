@@ -88,11 +88,6 @@ func toVector(embedding []float32) pgvector.Vector {
 	return pgvector.NewVector(embedding)
 }
 
-// Helper to convert pgvector.Vector to []float32
-func fromVector(v pgvector.Vector) []float32 {
-	return v.Slice()
-}
-
 // isUniqueConstraintError checks if the error is a unique constraint violation.
 func isUniqueConstraintError(err error) bool {
 	if err == nil {

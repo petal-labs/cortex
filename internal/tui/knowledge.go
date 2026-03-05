@@ -19,9 +19,9 @@ type KnowledgeModel struct {
 	loaded      bool
 
 	// Detail view
-	showingDetail    bool
+	showingDetail      bool
 	selectedCollection *types.Collection
-	collectionStats  *types.CollectionStats
+	collectionStats    *types.CollectionStats
 }
 
 // CollectionWithStats holds collection with its stats

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
 )
@@ -418,4 +419,3 @@ func (b *Backend) SearchMessages(ctx context.Context, namespace string, embeddin
 
 	return results, nil
 }
-

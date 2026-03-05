@@ -192,9 +192,9 @@ func TestListEntities(t *testing.T) {
 
 	// Create multiple entities
 	entities := []struct {
-		name      string
-		entType   types.EntityType
-		mentions  int64
+		name     string
+		entType  types.EntityType
+		mentions int64
 	}{
 		{"Alice", types.EntityTypePerson, 10},
 		{"Bob", types.EntityTypePerson, 5},

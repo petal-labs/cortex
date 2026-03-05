@@ -933,8 +933,8 @@ func TestBulkIngest(t *testing.T) {
 			Source:  "test://doc2",
 		},
 		{
-			Content: "Third document discussing database design patterns.",
-			Title:   "Document 3",
+			Content:  "Third document discussing database design patterns.",
+			Title:    "Document 3",
 			Metadata: map[string]string{"topic": "databases"},
 		},
 	}

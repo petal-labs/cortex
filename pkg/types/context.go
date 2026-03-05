@@ -4,13 +4,13 @@ import "time"
 
 // ContextEntry represents a key-value entry in the workflow context.
 type ContextEntry struct {
-	Namespace    string    `json:"namespace"`
-	RunID        *string   `json:"run_id,omitempty"` // Nil for cross-run state
-	Key          string    `json:"key"`
-	Value        any       `json:"value"`
-	Version      int64     `json:"version"`                  // Optimistic concurrency
-	UpdatedAt    time.Time `json:"updated_at"`
-	UpdatedBy    string    `json:"updated_by,omitempty"`     // Agent/task that last wrote
+	Namespace    string     `json:"namespace"`
+	RunID        *string    `json:"run_id,omitempty"` // Nil for cross-run state
+	Key          string     `json:"key"`
+	Value        any        `json:"value"`
+	Version      int64      `json:"version"` // Optimistic concurrency
+	UpdatedAt    time.Time  `json:"updated_at"`
+	UpdatedBy    string     `json:"updated_by,omitempty"`     // Agent/task that last wrote
 	TTLExpiresAt *time.Time `json:"ttl_expires_at,omitempty"` // Auto-expire time
 }
 

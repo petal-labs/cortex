@@ -59,9 +59,9 @@ func TestSearchMessages(t *testing.T) {
 
 	// Embeddings: msg-1 and msg-2 are similar (greetings), msg-3 is different (ML topic)
 	embeddings := [][]float32{
-		createTestEmbedding(0.1, 128), // Greeting 1
+		createTestEmbedding(0.1, 128),  // Greeting 1
 		createTestEmbedding(0.15, 128), // Greeting 2 (similar to 1)
-		createTestEmbedding(0.9, 128), // ML topic (different)
+		createTestEmbedding(0.9, 128),  // ML topic (different)
 	}
 
 	for i, msg := range messages {
@@ -381,9 +381,9 @@ func TestSearchEntities(t *testing.T) {
 
 	// Similar embeddings for AI companies, different for location
 	embeddings := [][]float32{
-		createTestEmbedding(0.3, 128), // AI company 1
+		createTestEmbedding(0.3, 128),  // AI company 1
 		createTestEmbedding(0.35, 128), // AI company 2 (similar)
-		createTestEmbedding(0.9, 128), // Location (different)
+		createTestEmbedding(0.9, 128),  // Location (different)
 	}
 
 	for i, entity := range entities {

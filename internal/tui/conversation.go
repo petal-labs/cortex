@@ -19,9 +19,9 @@ type ConversationModel struct {
 	loaded   bool
 
 	// Detail view
-	showingDetail   bool
-	selectedThread  *types.Thread
-	messages        []*types.Message
+	showingDetail  bool
+	selectedThread *types.Thread
+	messages       []*types.Message
 }
 
 // NewConversationModel creates a new conversation model

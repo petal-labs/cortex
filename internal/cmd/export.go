@@ -6,20 +6,21 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/internal/storage/sqlite"
-	"github.com/spf13/cobra"
 )
 
 var (
-	exportNamespace      string
-	exportOutput         string
-	exportNoEmbeddings   bool
-	exportConversations  bool
-	exportKnowledge      bool
-	exportContext        bool
-	exportEntities       bool
+	exportNamespace     string
+	exportOutput        string
+	exportNoEmbeddings  bool
+	exportConversations bool
+	exportKnowledge     bool
+	exportContext       bool
+	exportEntities      bool
 )
 
 var exportCmd = &cobra.Command{

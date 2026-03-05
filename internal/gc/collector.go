@@ -5,10 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/observability"
 	"github.com/petal-labs/cortex/internal/storage"
-	"go.uber.org/zap"
 )
 
 // Collector performs background garbage collection on storage data.

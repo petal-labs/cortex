@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/storage"
@@ -17,12 +18,12 @@ import (
 
 // Common errors returned by the knowledge engine.
 var (
-	ErrEmptyContent        = errors.New("document content cannot be empty")
-	ErrCollectionNotFound  = errors.New("collection not found")
-	ErrDocumentNotFound    = errors.New("document not found")
-	ErrCollectionExists    = errors.New("collection already exists")
-	ErrEmbeddingRequired   = errors.New("embedding provider required for search")
-	ErrInvalidChunkConfig  = errors.New("invalid chunk configuration")
+	ErrEmptyContent       = errors.New("document content cannot be empty")
+	ErrCollectionNotFound = errors.New("collection not found")
+	ErrDocumentNotFound   = errors.New("document not found")
+	ErrCollectionExists   = errors.New("collection already exists")
+	ErrEmbeddingRequired  = errors.New("embedding provider required for search")
+	ErrInvalidChunkConfig = errors.New("invalid chunk configuration")
 )
 
 // ExtractionEnqueuer queues content for entity extraction.
@@ -90,10 +91,10 @@ func (e *Engine) enqueueForExtraction(ctx context.Context, namespace, chunkID, c
 
 // IngestOpts contains options for document ingestion.
 type IngestOpts struct {
-	Title       string            // Optional document title
-	Source      string            // Source URL or identifier
-	ContentType string            // "text", "markdown", "html"
-	Metadata    map[string]string // Optional metadata
+	Title       string             // Optional document title
+	Source      string             // Source URL or identifier
+	ContentType string             // "text", "markdown", "html"
+	Metadata    map[string]string  // Optional metadata
 	ChunkConfig *types.ChunkConfig // Override collection's default config
 }
 
@@ -247,10 +248,10 @@ type BulkIngestDocument struct {
 
 // BulkIngestOpts contains options for bulk document ingestion.
 type BulkIngestOpts struct {
-	ChunkConfig    *types.ChunkConfig                    // Override collection's default config
-	Concurrency    int                                   // Number of concurrent workers (0 = default 4)
-	OnProgress     func(completed, total int, doc string) // Optional progress callback
-	ContinueOnError bool                                  // Continue processing on individual document errors
+	ChunkConfig     *types.ChunkConfig                     // Override collection's default config
+	Concurrency     int                                    // Number of concurrent workers (0 = default 4)
+	OnProgress      func(completed, total int, doc string) // Optional progress callback
+	ContinueOnError bool                                   // Continue processing on individual document errors
 }
 
 // BulkIngestDocResult contains the result for a single document.
@@ -265,12 +266,12 @@ type BulkIngestDocResult struct {
 
 // BulkIngestResult contains the overall result of bulk ingestion.
 type BulkIngestResult struct {
-	CollectionID    string                 `json:"collection_id"`
-	TotalDocuments  int                    `json:"total_documents"`
-	Succeeded       int                    `json:"succeeded"`
-	Failed          int                    `json:"failed"`
-	TotalChunks     int                    `json:"total_chunks"`
-	Documents       []*BulkIngestDocResult `json:"documents"`
+	CollectionID   string                 `json:"collection_id"`
+	TotalDocuments int                    `json:"total_documents"`
+	Succeeded      int                    `json:"succeeded"`
+	Failed         int                    `json:"failed"`
+	TotalChunks    int                    `json:"total_chunks"`
+	Documents      []*BulkIngestDocResult `json:"documents"`
 }
 
 // BulkIngest ingests multiple documents into a collection with progress reporting.
@@ -423,13 +424,13 @@ const (
 
 // SearchOpts contains options for knowledge search.
 type SearchOpts struct {
-	CollectionID   *string           // Optional: limit to specific collection
-	TopK           int               // Number of results (0 = default 10)
-	MinScore       float64           // Minimum similarity score (0-1)
-	Filters        map[string]string // Metadata filters
-	ContextWindow  int               // Chunks before/after to include (0 = none)
-	SearchMode     SearchMode        // Search mode: "vector" (default), "hybrid", or "text"
-	Alpha          float64           // Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)
+	CollectionID  *string           // Optional: limit to specific collection
+	TopK          int               // Number of results (0 = default 10)
+	MinScore      float64           // Minimum similarity score (0-1)
+	Filters       map[string]string // Metadata filters
+	ContextWindow int               // Chunks before/after to include (0 = none)
+	SearchMode    SearchMode        // Search mode: "vector" (default), "hybrid", or "text"
+	Alpha         float64           // Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)
 }
 
 // SearchResult contains search results with optional context.
@@ -588,8 +589,8 @@ func (e *Engine) DeleteDocument(ctx context.Context, namespace, docID string) er
 
 // CreateCollectionOpts contains options for creating a collection.
 type CreateCollectionOpts struct {
-	Name        string            // Required: collection name
-	Description string            // Optional description
+	Name        string             // Required: collection name
+	Description string             // Optional description
 	ChunkConfig *types.ChunkConfig // Chunk configuration (uses default if nil)
 }
 

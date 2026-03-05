@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/storage/sqlite"
-	"github.com/spf13/cobra"
 )
 
 var (

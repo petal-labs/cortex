@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/petal-labs/cortex/internal/conversation"
 	ctxengine "github.com/petal-labs/cortex/internal/context"
+	"github.com/petal-labs/cortex/internal/conversation"
 	"github.com/petal-labs/cortex/internal/entity"
 	"github.com/petal-labs/cortex/internal/knowledge"
 	"github.com/petal-labs/cortex/internal/storage"
@@ -30,22 +30,22 @@ const (
 
 // KeyMap defines the key bindings for the TUI
 type KeyMap struct {
-	Up       key.Binding
-	Down     key.Binding
-	Left     key.Binding
-	Right    key.Binding
-	Enter    key.Binding
-	Back     key.Binding
-	Tab      key.Binding
-	Search   key.Binding
-	Refresh  key.Binding
-	Help     key.Binding
-	Quit     key.Binding
-	Nav1     key.Binding
-	Nav2     key.Binding
-	Nav3     key.Binding
-	Nav4     key.Binding
-	Nav5     key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Left    key.Binding
+	Right   key.Binding
+	Enter   key.Binding
+	Back    key.Binding
+	Tab     key.Binding
+	Search  key.Binding
+	Refresh key.Binding
+	Help    key.Binding
+	Quit    key.Binding
+	Nav1    key.Binding
+	Nav2    key.Binding
+	Nav3    key.Binding
+	Nav4    key.Binding
+	Nav5    key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings
@@ -130,20 +130,20 @@ type Model struct {
 	ctx          context.Context
 
 	// UI state
-	currentView    View
-	width          int
-	height         int
-	keys           KeyMap
-	showHelp       bool
-	loading        bool
-	spinner        spinner.Model
-	err            error
+	currentView View
+	width       int
+	height      int
+	keys        KeyMap
+	showHelp    bool
+	loading     bool
+	spinner     spinner.Model
+	err         error
 
 	// View-specific state
-	dashboardModel *DashboardModel
-	knowledgeModel *KnowledgeModel
+	dashboardModel    *DashboardModel
+	knowledgeModel    *KnowledgeModel
 	conversationModel *ConversationModel
-	entityModel    *EntityModel
+	entityModel       *EntityModel
 }
 
 // Config holds TUI configuration

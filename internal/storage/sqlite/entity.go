@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
 )

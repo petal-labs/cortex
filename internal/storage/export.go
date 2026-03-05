@@ -6,9 +6,9 @@ import (
 
 // ExportData represents all data for a namespace that can be exported/imported.
 type ExportData struct {
-	Version   int    `json:"version"`
-	Namespace string `json:"namespace"`
-	ExportedAt int64 `json:"exported_at"`
+	Version    int    `json:"version"`
+	Namespace  string `json:"namespace"`
+	ExportedAt int64  `json:"exported_at"`
 
 	// Conversation data
 	Threads  []*ThreadExport  `json:"threads,omitempty"`
@@ -20,7 +20,7 @@ type ExportData struct {
 	Chunks      []*ChunkExport      `json:"chunks,omitempty"`
 
 	// Context data
-	ContextEntries []*types.ContextEntry  `json:"context_entries,omitempty"`
+	ContextEntries []*types.ContextEntry   `json:"context_entries,omitempty"`
 	ContextHistory []*ContextHistoryExport `json:"context_history,omitempty"`
 
 	// Entity data

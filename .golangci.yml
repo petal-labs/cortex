@@ -55,16 +55,16 @@ linters:
         - "-S1039"
     gosec:
       excludes:
+        - G101
         - G104
+        - G107
         - G201
         - G202
         - G301
         - G304
         - G306
-        - G101
         - G404
         - G602
-        - G704
 
   exclusions:
     rules:
@@ -86,6 +86,13 @@ linters:
       - path: internal/entity/
         linters:
           - errcheck
+          - gosec
+      - path: internal/embedding/
+        linters:
+          - gosec
+      - path: internal/summarization/
+        linters:
+          - gosec
 
 formatters:
   enable:

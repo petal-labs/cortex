@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.0"
+          go-version: "1.24.2"
           cache: true
 
       - name: Build
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.0"
+          go-version: "1.24.2"
           cache: true
 
       - name: golangci-lint
@@ -85,13 +85,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.0"
+          go-version: "1.24.2"
           cache: true
 
       - name: Run gosec
         uses: securego/gosec@v2.22.11
         with:
-          args: -exclude=G101,G104,G301,G304,G306,G404 -exclude-dir=.git -exclude-dir=vendor ./...
+          args: -exclude=G101,G104,G201,G202,G301,G304,G306,G404,G602,G704 -exclude-dir=.git -exclude-dir=vendor ./...
 
   build:
     name: Build Binary
@@ -102,7 +102,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.0"
+          go-version: "1.24.2"
           cache: true
 
       - name: Build

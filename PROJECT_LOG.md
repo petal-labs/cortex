@@ -349,6 +349,164 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - `internal/cmd/entity.go` - Entity memory CLI commands
 - `internal/cmd/namespace.go` - Namespace management CLI commands
 
+### 2026-03-04 - Phase 3 Milestone 3.1 Completed (pgvector Backend)
+
+**Milestone 3.1 Completed:**
+- PostgreSQL + pgvector backend implemented as production alternative to SQLite
+- Full feature parity with SQLite backend for all storage operations
+- Backend selection via config: `storage.backend: "pgvector"` with `storage.database_url`
+
+**Key Implementation Details:**
+- pgvector.go: Core Backend struct with pgxpool connection management
+- migrations.go: PostgreSQL schema with pgvector extension, HNSW indexes
+- conversation.go: Thread/message operations with semantic search
+- knowledge.go: Collection/document/chunk operations with vector search
+- context.go: Key-value context with version history and TTL
+- entity.go: Entity extraction queue, relationships, alias resolution
+- storage.go: Backend factory function for runtime selection
+
+**PostgreSQL-specific Features:**
+- HNSW vector indexes for efficient approximate nearest neighbor search
+- TIMESTAMPTZ for proper timezone handling
+- JSONB for metadata storage with native JSON operations
+- `ON CONFLICT DO UPDATE` for upserts
+- `FOR UPDATE SKIP LOCKED` for atomic queue processing
+- pgx/v5 with connection pooling (25 max, 5 min connections)
+
+**CLI Backend Selection:**
+- All CLI commands updated to use shared `createStorage()` factory
+- Supports "sqlite", "pgvector", "postgres", "postgresql" backend values
+- Validates database_url is present when pgvector selected
+
+**New Files:**
+- `internal/storage/pgvector/pgvector.go` - Backend struct and connection management
+- `internal/storage/pgvector/migrations.go` - PostgreSQL schema (16 tables)
+- `internal/storage/pgvector/conversation.go` - Conversation storage operations
+- `internal/storage/pgvector/knowledge.go` - Knowledge storage operations
+- `internal/storage/pgvector/context.go` - Context storage operations
+- `internal/storage/pgvector/entity.go` - Entity storage operations
+- `internal/cmd/storage.go` - Shared backend factory function
+
+**Milestone 3.2 Completed (SSE Transport):**
+- Server-Sent Events transport implemented for web-based MCP clients
+- Supports both stdio (default) and SSE transport modes
+- CLI flags: `--transport stdio|sse` and `--port 9810`
+
+**Implementation Details:**
+- `ServeSSE(addr string)` method added to MCP server
+- Uses mcp-go's NewSSEServer with keep-alive enabled
+- SSE endpoint at `/sse` for event streaming
+- Message endpoint at `/message` for client-to-server communication
+- Session ID generated per connection for stateful communication
+
+**Usage Examples:**
+```bash
+# Default stdio transport
+cortex serve
+
+# SSE transport on port 9810
+cortex serve --transport sse --port 9810
+
+# SSE with namespace restriction
+cortex serve --transport sse --port 9810 --namespace my-workflow
+```
+
+**Modified Files:**
+- `internal/server/mcp.go` - Added ServeSSE and SSEServer methods
+- `internal/cmd/serve.go` - Added --transport and --port flags
+
+**Milestone 3.3 Completed (Observability):**
+- Prometheus metrics with all core metrics from FRD section 11.1
+- Structured JSON logging with zap
+- Metrics HTTP server with health endpoint
+
+**Prometheus Metrics Implemented:**
+- `cortex_operations_total` - Counter by primitive, action, namespace, status
+- `cortex_operation_duration_seconds` - Histogram for operation latency
+- `cortex_search_latency_seconds` - Histogram for vector search latency
+- `cortex_search_result_count` - Histogram for result counts
+- `cortex_embedding_latency_seconds` - Histogram for embedding API latency
+- `cortex_embedding_requests_total` - Counter for embedding API calls
+- `cortex_extraction_queue_size` - Gauge for pending queue items
+- `cortex_extraction_dead_letter_count` - Gauge for failed items
+- `cortex_extraction_processed_total` - Counter by status
+- `cortex_storage_operation_duration_seconds` - Histogram for storage ops
+
+**Structured Logging Features:**
+- JSON format when `structured_logging: true` (default)
+- Context fields: request_id, namespace, thread_id, run_id, entity_id
+- Duration tracking in milliseconds
+- Error context propagation
+- Configurable log level
+
+**Endpoints:**
+- `/metrics` - Prometheus metrics (port 9811 default)
+- `/health` - Health check returning "ok"
+
+**New Files:**
+- `internal/observability/metrics.go` - Prometheus metrics definitions
+- `internal/observability/logging.go` - Structured logging with zap
+- `internal/observability/server.go` - Metrics HTTP server
+
+**Modified Files:**
+- `internal/cmd/serve.go` - Initialize logging and metrics on startup
+
+**Milestone 3.4 Completed (Retention & Garbage Collection):**
+- Background garbage collector with configurable intervals
+- TTL cleanup runs on `ttl_cleanup_interval` (default 60s)
+- Full GC runs on `gc_interval` (default 24h)
+
+**GC Operations Implemented:**
+- `CleanupExpiredContext` - Remove entries past TTL expiration
+- `DeleteOldConversations` - Remove threads older than retention period
+- `PruneStaleEntities` - Remove entities with low mention counts and old last_seen_at
+- `DeleteOrphanedChunks` - Remove chunks whose documents were deleted
+- `CleanupContextHistory` - Remove old version history entries
+- `CleanupOldRunContext` - Remove old run-scoped context
+
+**CLI GC Command:**
+```bash
+# Run all GC tasks
+cortex gc --all
+
+# Run specific tasks
+cortex gc --expired-ttl --orphaned-chunks
+
+# Dry run to see what would be deleted
+cortex gc --dry-run
+```
+
+**New Files:**
+- `internal/storage/backend.go` - Added GarbageCollection interface
+- `internal/storage/sqlite/gc.go` - SQLite GC implementation
+- `internal/storage/pgvector/gc.go` - pgvector GC implementation
+- `internal/gc/collector.go` - Background GC worker
+- `internal/cmd/gc.go` - CLI gc command
+
+**Modified Files:**
+- `internal/cmd/serve.go` - Start GC collector on server startup
+
+**Milestone 3.5 Completed (Backup & Export):**
+- SQLite online backup using SQLite3 backup API (hot backup, no downtime)
+- JSON export for namespace data migration
+
+**Backup Features:**
+- `cortex backup --output backup.db` - Create consistent SQLite backup
+- Progress reporting during backup
+- PostgreSQL guidance (use pg_dump)
+
+**Export Features:**
+- `cortex export --namespace X --output export.json` - Export namespace data
+- Options: --no-embeddings, --conversations-only, --knowledge-only, etc.
+- Exports threads, messages, collections, documents, chunks, context, entities
+
+**New Files:**
+- `internal/storage/sqlite/backup.go` - SQLite backup implementation
+- `internal/storage/export.go` - Export data structures
+- `internal/storage/sqlite/export.go` - SQLite export implementation
+- `internal/cmd/backup.go` - CLI backup command
+- `internal/cmd/export.go` - CLI export command
+
 ---
 
 ## Implementation Status
@@ -373,10 +531,11 @@ Cortex provides persistent context, vector-backed knowledge retrieval, and conve
 - [ ] Embedding Cache (deferred - already have basic LRU cache)
 
 ### Phase 3: Production Hardening
-- [ ] pgvector Backend
-- [ ] SSE Transport
-- [ ] Prometheus Metrics
-- [ ] Retention Policies
+- [x] pgvector Backend
+- [x] SSE Transport
+- [x] Prometheus Metrics & Structured Logging
+- [x] Retention & Garbage Collection
+- [x] Backup & Export
 
 ### Phase 4: Ecosystem Integration
 - [ ] Hybrid Search
@@ -391,3 +550,4 @@ None yet.
 ## Notes
 - Project follows the Cortex FRD specification exactly
 - Each phase has verification tests before moving forward
+- Phase 3 Production Hardening is complete

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/petal-labs/cortex/pkg/types"
 )
@@ -31,6 +32,9 @@ type Backend interface {
 
 	// Lifecycle operations
 	Lifecycle
+
+	// Garbage collection operations
+	GarbageCollection
 }
 
 // ConversationStorage defines operations for conversation memory.
@@ -241,4 +245,28 @@ type Lifecycle interface {
 
 	// Health checks the health of the storage backend.
 	Health(ctx context.Context) error
+}
+
+// GarbageCollection defines operations for data lifecycle management.
+type GarbageCollection interface {
+	// DeleteOldConversations removes threads and their messages older than the specified duration.
+	// Returns the number of threads deleted.
+	DeleteOldConversations(ctx context.Context, olderThan time.Duration) (int64, error)
+
+	// PruneStaleEntities removes entities that haven't been mentioned recently
+	// and have fewer mentions than the threshold.
+	// Returns the number of entities deleted.
+	PruneStaleEntities(ctx context.Context, staleDuration time.Duration, minMentions int) (int64, error)
+
+	// DeleteOrphanedChunks removes chunks whose parent documents no longer exist.
+	// Returns the number of chunks deleted.
+	DeleteOrphanedChunks(ctx context.Context) (int64, error)
+
+	// CleanupContextHistory removes context version history entries older than the specified duration.
+	// Returns the number of history entries deleted.
+	CleanupContextHistory(ctx context.Context, olderThan time.Duration) (int64, error)
+
+	// CleanupOldRunContext removes run-scoped context entries older than the specified duration.
+	// Returns the number of entries deleted.
+	CleanupOldRunContext(ctx context.Context, olderThan time.Duration) (int64, error)
 }

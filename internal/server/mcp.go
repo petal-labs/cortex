@@ -73,6 +73,27 @@ func (s *Server) ServeStdio() error {
 	return server.ServeStdio(s.mcp)
 }
 
+// ServeSSE starts the MCP server using Server-Sent Events transport.
+// The server listens on the specified address (e.g., ":9810").
+func (s *Server) ServeSSE(addr string) error {
+	sseServer := server.NewSSEServer(s.mcp,
+		server.WithSSEEndpoint("/sse"),
+		server.WithMessageEndpoint("/message"),
+		server.WithKeepAlive(true),
+	)
+	return sseServer.Start(addr)
+}
+
+// SSEServer returns the underlying SSE server for custom HTTP integration.
+// This allows embedding the SSE endpoints in an existing HTTP server.
+func (s *Server) SSEServer() *server.SSEServer {
+	return server.NewSSEServer(s.mcp,
+		server.WithSSEEndpoint("/sse"),
+		server.WithMessageEndpoint("/message"),
+		server.WithKeepAlive(true),
+	)
+}
+
 // checkNamespace validates that the namespace is allowed.
 func (s *Server) checkNamespace(namespace string) error {
 	if s.allowedNamespace != "" && namespace != s.allowedNamespace {

@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
 )
 
 var namespaceCmd = &cobra.Command{
@@ -59,7 +58,7 @@ func runNamespaceStats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -122,7 +121,7 @@ func runNamespaceDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/petal-labs/cortex/internal/conversation"
 	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
 	"github.com/petal-labs/cortex/internal/summarization"
 )
 
@@ -148,7 +147,7 @@ func initConversationEngine(cmd *cobra.Command, withSummarizer bool) (*conversat
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -311,7 +310,7 @@ func runConversationList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}

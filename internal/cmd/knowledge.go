@@ -11,7 +11,6 @@ import (
 
 	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/knowledge"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
 	"github.com/petal-labs/cortex/pkg/types"
 )
 
@@ -151,7 +150,7 @@ func initKnowledgeEngine(cmd *cobra.Command) (*knowledge.Engine, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -345,7 +344,7 @@ func runKnowledgeStats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -411,7 +410,7 @@ func runKnowledgeCollections(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}

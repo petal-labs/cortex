@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -11,15 +12,19 @@ import (
 	"github.com/petal-labs/cortex/internal/conversation"
 	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/entity"
+	"github.com/petal-labs/cortex/internal/gc"
 	"github.com/petal-labs/cortex/internal/knowledge"
+	"github.com/petal-labs/cortex/internal/observability"
 	"github.com/petal-labs/cortex/internal/server"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
+	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/internal/summarization"
 )
 
 var (
 	mcpMode          bool
 	allowedNamespace string
+	transport        string
+	port             int
 )
 
 var serveCmd = &cobra.Command{
@@ -30,15 +35,22 @@ var serveCmd = &cobra.Command{
 By default, starts in MCP mode using stdio transport for integration
 with AI agents and tools.
 
+Transport modes:
+  stdio - Standard input/output (default, for process-based MCP clients)
+  sse   - Server-Sent Events over HTTP (for web-based MCP clients)
+
 Examples:
-  # Start MCP server (default)
+  # Start MCP server with stdio transport (default)
   cortex serve
+
+  # Start MCP server with SSE transport on port 9810
+  cortex serve --transport sse --port 9810
 
   # Start MCP server with namespace restriction
   cortex serve --namespace my-workflow
 
-  # Explicitly specify MCP mode
-  cortex serve --mcp`,
+  # SSE server with namespace restriction
+  cortex serve --transport sse --port 9810 --namespace my-workflow`,
 	RunE: runServe,
 }
 
@@ -46,6 +58,8 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().BoolVar(&mcpMode, "mcp", true, "Run in MCP mode (default)")
 	serveCmd.Flags().StringVar(&allowedNamespace, "namespace", "", "Restrict to a single namespace")
+	serveCmd.Flags().StringVar(&transport, "transport", "stdio", "Transport mode: stdio or sse")
+	serveCmd.Flags().IntVar(&port, "port", 9810, "Port for SSE transport (default 9810)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -56,10 +70,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Create storage backend
-	store, err := sqlite.New(cfg)
+	// Initialize structured logging
+	if err := observability.InitLogger(cfg.Server.LogLevel, cfg.Server.StructuredLogging); err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+	defer observability.DefaultLogger.Sync()
+
+	// Create storage backend based on configuration
+	store, err := createStorage(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
+	}
+
+	// Initialize metrics if enabled
+	var metricsServer *observability.MetricsServer
+	if cfg.Server.MetricsEnabled {
+		// Create queue stats provider
+		queueStats := &queueStatsAdapter{store: store}
+		observability.InitMetrics(queueStats)
+
+		// Start metrics server
+		metricsServer = observability.NewMetricsServer(cfg.Server.MetricsPort)
+		metricsServer.Start()
 	}
 
 	// Create embedding provider if Iris is configured
@@ -124,6 +156,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		knowEngine.SetExtractionEnqueuer(enqueuer)
 	}
 
+	// Start garbage collector in background
+	gcCollector := gc.NewCollector(store, cfg)
+	gcCollector.Start()
+	defer gcCollector.Stop()
+
 	// Start MCP server
 	if mcpMode {
 		mcpCfg := &server.Config{
@@ -140,7 +177,33 @@ func runServe(cmd *cobra.Command, args []string) error {
 			queueProcessor.Start(ctx)
 		}
 
-		return srv.ServeStdio()
+		// Select transport mode
+		switch transport {
+		case "stdio", "":
+			observability.Info(context.Background(), "starting MCP server with stdio transport")
+			return srv.ServeStdio()
+
+		case "sse":
+			addr := fmt.Sprintf(":%d", port)
+			observability.Info(context.Background(), "starting MCP server with SSE transport",
+				observability.Field("addr", addr),
+				observability.Field("sse_endpoint", fmt.Sprintf("/sse")),
+				observability.Field("message_endpoint", fmt.Sprintf("/message")),
+			)
+			// Also print to stdout for non-structured logging
+			if !cfg.Server.StructuredLogging {
+				fmt.Printf("Starting Cortex MCP server with SSE transport on %s\n", addr)
+				fmt.Printf("  SSE endpoint: http://localhost:%d/sse\n", port)
+				fmt.Printf("  Message endpoint: http://localhost:%d/message\n", port)
+				if cfg.Server.MetricsEnabled {
+					fmt.Printf("  Metrics endpoint: http://localhost:%d/metrics\n", cfg.Server.MetricsPort)
+				}
+			}
+			return srv.ServeSSE(addr)
+
+		default:
+			return fmt.Errorf("unknown transport: %q (supported: stdio, sse)", transport)
+		}
 	}
 
 	return fmt.Errorf("only MCP mode is currently supported")
@@ -163,4 +226,25 @@ func loadConfig(configPath string) (*config.Config, error) {
 
 	// Use default config
 	return config.DefaultConfig(), nil
+}
+
+// queueStatsAdapter adapts the storage backend to provide queue statistics.
+type queueStatsAdapter struct {
+	store storage.Backend
+}
+
+func (a *queueStatsAdapter) GetQueueSize() int64 {
+	stats, err := a.store.GetExtractionQueueStats(context.Background())
+	if err != nil {
+		return 0
+	}
+	return stats.PendingCount + stats.ProcessingCount
+}
+
+func (a *queueStatsAdapter) GetDeadLetterCount() int64 {
+	stats, err := a.store.GetExtractionQueueStats(context.Background())
+	if err != nil {
+		return 0
+	}
+	return stats.DeadLetterCount
 }

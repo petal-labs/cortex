@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	ctxengine "github.com/petal-labs/cortex/internal/context"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
 )
 
 var contextCmd = &cobra.Command{
@@ -148,7 +147,7 @@ func initContextEngine(cmd *cobra.Command) (*ctxengine.Engine, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := sqlite.New(cfg)
+	store, err := createStorage(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}

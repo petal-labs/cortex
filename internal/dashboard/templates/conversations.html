@@ -1,0 +1,61 @@
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="page-header">
+    <h1 class="page-title">Conversations</h1>
+    <p class="page-subtitle">Browse conversation threads</p>
+</div>
+
+{{if .Error}}
+<div class="card" style="border-color: var(--accent-red);">
+    <div class="card-body" style="color: var(--accent-red);">
+        Error: {{.Error}}
+    </div>
+</div>
+{{else}}
+
+{{with .Content}}
+{{if .}}
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Agent</th>
+                <th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .}}
+            <tr>
+                <td>
+                    <a href="/conversations/{{.ID}}">{{if .Title}}{{truncate .Title 50}}{{else}}Untitled{{end}}</a>
+                </td>
+                <td>
+                    {{if .AgentID}}
+                    <span class="badge badge-blue">{{.AgentID}}</span>
+                    {{else}}
+                    <span class="badge">default</span>
+                    {{end}}
+                </td>
+                <td style="color: var(--text-muted);">
+                    {{timeAgo .UpdatedAt}}
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+    <p>No conversations found</p>
+    <p style="font-size: 12px;">Start a conversation using the MCP tools to see it here</p>
+</div>
+{{end}}
+{{end}}
+
+{{end}}
+{{end}}

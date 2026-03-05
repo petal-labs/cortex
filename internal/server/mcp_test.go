@@ -58,10 +58,15 @@ func testServer(t *testing.T, allowedNamespace string) *Server {
 	t.Helper()
 
 	// Create in-memory SQLite database
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite3", ":memory:?_foreign_keys=ON")
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
+
+	// SQLite requires single connection for in-memory databases
+	// to ensure all operations see the same data
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Create backend and run migrations
 	backend := sqlite.NewWithDB(db)
@@ -403,6 +408,85 @@ func TestKnowledgeCollections(t *testing.T) {
 	}
 	if deleteResult.IsError {
 		t.Errorf("unexpected tool error: %v", getTextContent(deleteResult))
+	}
+}
+
+func TestKnowledgeBulkIngest(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Create a collection first
+	collReq := makeToolRequest("knowledge_collections", map[string]any{
+		"namespace": "test-ns",
+		"action":    "create",
+		"name":      "bulk-test-collection",
+	})
+
+	collResult, err := srv.handleKnowledgeCollections(ctx, collReq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var collData struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(collResult)), &collData); err != nil {
+		t.Fatalf("failed to parse collection result: %v", err)
+	}
+
+	// Bulk ingest multiple documents
+	bulkReq := makeToolRequest("knowledge_bulk_ingest", map[string]any{
+		"namespace":     "test-ns",
+		"collection_id": collData.ID,
+		"documents": []any{
+			map[string]any{
+				"content": "First document about machine learning and neural networks.",
+				"title":   "ML Basics",
+				"source":  "test://doc1",
+			},
+			map[string]any{
+				"content": "Second document about database optimization techniques.",
+				"title":   "DB Optimization",
+			},
+			map[string]any{
+				"content": "Third document covering API design patterns and best practices.",
+				"title":   "API Design",
+				"metadata": map[string]any{"topic": "api"},
+			},
+		},
+		"concurrency": float64(2),
+	})
+
+	bulkResult, err := srv.handleKnowledgeBulkIngest(ctx, bulkReq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bulkResult.IsError {
+		t.Errorf("unexpected tool error: %v", getTextContent(bulkResult))
+	}
+
+	// Parse result
+	var result struct {
+		TotalDocuments int `json:"total_documents"`
+		Succeeded      int `json:"succeeded"`
+		Failed         int `json:"failed"`
+		TotalChunks    int `json:"total_chunks"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(bulkResult)), &result); err != nil {
+		t.Fatalf("failed to parse bulk result: %v", err)
+	}
+
+	if result.TotalDocuments != 3 {
+		t.Errorf("expected 3 total documents, got %d", result.TotalDocuments)
+	}
+	if result.Succeeded != 3 {
+		t.Errorf("expected 3 succeeded, got %d", result.Succeeded)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failed, got %d", result.Failed)
+	}
+	if result.TotalChunks == 0 {
+		t.Error("expected at least some chunks")
 	}
 }
 

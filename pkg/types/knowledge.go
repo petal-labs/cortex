@@ -62,6 +62,7 @@ func DefaultChunkConfig() ChunkConfig {
 type ChunkResult struct {
 	Chunk         *Chunk            `json:"chunk"`
 	Score         float64           `json:"score"`
+	Rank          int               `json:"rank,omitempty"` // Position in result set (for RRF)
 	DocumentTitle string            `json:"document_title"`
 	Source        string            `json:"source"`
 	DocMetadata   map[string]string `json:"doc_metadata,omitempty"`

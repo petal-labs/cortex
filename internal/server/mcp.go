@@ -158,7 +158,7 @@ func (s *Server) registerConversationTools() {
 
 	// conversation_search
 	searchTool := mcp.NewTool("conversation_search",
-		mcp.WithDescription("Semantic search across conversation history in a namespace."),
+		mcp.WithDescription("Search across conversation history in a namespace. Supports vector (semantic), hybrid (vector+text), or text-only search modes."),
 		mcp.WithString("namespace",
 			mcp.Required(),
 			mcp.Description("Isolation scope"),
@@ -172,6 +172,13 @@ func (s *Server) registerConversationTools() {
 		),
 		mcp.WithNumber("top_k",
 			mcp.Description("Max results (default: 5)"),
+		),
+		mcp.WithString("search_mode",
+			mcp.Description("Search mode: vector (semantic similarity), hybrid (vector+text with RRF), or text (BM25 full-text)"),
+			mcp.Enum("vector", "hybrid", "text"),
+		),
+		mcp.WithNumber("alpha",
+			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
 		),
 	)
 	s.mcp.AddTool(searchTool, s.handleConversationSearch)
@@ -259,6 +266,13 @@ func (s *Server) registerKnowledgeTools() {
 		mcp.WithNumber("context_window",
 			mcp.Description("Number of adjacent chunks to include (default: 1)"),
 		),
+		mcp.WithString("search_mode",
+			mcp.Description("Search mode: vector (semantic similarity), hybrid (vector+text with RRF), or text (BM25 full-text)"),
+			mcp.Enum("vector", "hybrid", "text"),
+		),
+		mcp.WithNumber("alpha",
+			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
+		),
 	)
 	s.mcp.AddTool(searchTool, s.handleKnowledgeSearch)
 
@@ -288,6 +302,33 @@ func (s *Server) registerKnowledgeTools() {
 		),
 	)
 	s.mcp.AddTool(collectionsTool, s.handleKnowledgeCollections)
+
+	// knowledge_bulk_ingest
+	bulkIngestTool := mcp.NewTool("knowledge_bulk_ingest",
+		mcp.WithDescription("Ingest multiple documents into the knowledge store in a single operation. Provides progress reporting and per-document results."),
+		mcp.WithString("namespace",
+			mcp.Required(),
+			mcp.Description("Isolation scope"),
+		),
+		mcp.WithString("collection_id",
+			mcp.Required(),
+			mcp.Description("Collection to add documents to"),
+		),
+		mcp.WithArray("documents",
+			mcp.Required(),
+			mcp.Description("Array of documents to ingest. Each document should have: content (required), title, source, content_type, metadata"),
+		),
+		mcp.WithNumber("concurrency",
+			mcp.Description("Number of concurrent workers (default: 4, max: 10)"),
+		),
+		mcp.WithBoolean("continue_on_error",
+			mcp.Description("Continue processing if individual documents fail (default: true)"),
+		),
+		mcp.WithObject("chunk_config",
+			mcp.Description("Override collection's default chunking for all documents (optional)"),
+		),
+	)
+	s.mcp.AddTool(bulkIngestTool, s.handleKnowledgeBulkIngest)
 }
 
 // registerContextTools registers workflow context tools.
@@ -449,6 +490,13 @@ func (s *Server) registerEntityTools() {
 		),
 		mcp.WithNumber("top_k",
 			mcp.Description("Max results (default: 10)"),
+		),
+		mcp.WithString("search_mode",
+			mcp.Description("Search mode: vector (semantic similarity), hybrid (vector+text with RRF), or text (BM25 full-text)"),
+			mcp.Enum("vector", "hybrid", "text"),
+		),
+		mcp.WithNumber("alpha",
+			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
 		),
 	)
 	s.mcp.AddTool(searchTool, s.handleEntitySearch)
@@ -648,6 +696,14 @@ func (s *Server) handleConversationSearch(ctx context.Context, req mcp.CallToolR
 		opts.TopK = int(topK)
 	}
 
+	if searchMode, ok := req.GetArguments()["search_mode"].(string); ok {
+		opts.SearchMode = conversation.SearchMode(searchMode)
+	}
+
+	if alpha, ok := req.GetArguments()["alpha"].(float64); ok {
+		opts.Alpha = alpha
+	}
+
 	result, err := s.conversation.Search(ctx, namespace, query, opts)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -778,6 +834,23 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 		opts.ContextWindow = 1 // default context window
 	}
 
+	// Parse search mode
+	if searchMode, ok := req.GetArguments()["search_mode"].(string); ok {
+		switch searchMode {
+		case "hybrid":
+			opts.SearchMode = knowledge.SearchModeHybrid
+		case "text":
+			opts.SearchMode = knowledge.SearchModeText
+		default:
+			opts.SearchMode = knowledge.SearchModeVector
+		}
+	}
+
+	// Parse alpha for hybrid search weighting
+	if alpha, ok := req.GetArguments()["alpha"].(float64); ok {
+		opts.Alpha = alpha
+	}
+
 	result, err := s.knowledge.Search(ctx, namespace, query, opts)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -848,6 +921,86 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 	default:
 		return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s", action)), nil
 	}
+}
+
+func (s *Server) handleKnowledgeBulkIngest(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	namespace, err := req.RequireString("namespace")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := s.checkNamespace(namespace); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	collectionID, err := req.RequireString("collection_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Parse documents array
+	docsRaw, ok := req.GetArguments()["documents"].([]any)
+	if !ok || len(docsRaw) == 0 {
+		return mcp.NewToolResultError("documents array is required and cannot be empty"), nil
+	}
+
+	documents := make([]knowledge.BulkIngestDocument, 0, len(docsRaw))
+	for i, docRaw := range docsRaw {
+		docMap, ok := docRaw.(map[string]any)
+		if !ok {
+			return mcp.NewToolResultError(fmt.Sprintf("document %d: invalid format, expected object", i)), nil
+		}
+
+		content, ok := docMap["content"].(string)
+		if !ok || content == "" {
+			return mcp.NewToolResultError(fmt.Sprintf("document %d: content is required", i)), nil
+		}
+
+		doc := knowledge.BulkIngestDocument{
+			Content: content,
+		}
+
+		if title, ok := docMap["title"].(string); ok {
+			doc.Title = title
+		}
+		if source, ok := docMap["source"].(string); ok {
+			doc.Source = source
+		}
+		if contentType, ok := docMap["content_type"].(string); ok {
+			doc.ContentType = contentType
+		}
+		if metadata, ok := docMap["metadata"].(map[string]any); ok {
+			doc.Metadata = toStringMap(metadata)
+		}
+
+		documents = append(documents, doc)
+	}
+
+	opts := &knowledge.BulkIngestOpts{
+		ContinueOnError: true, // default
+	}
+
+	if concurrency, ok := req.GetArguments()["concurrency"].(float64); ok {
+		c := int(concurrency)
+		if c > 10 {
+			c = 10 // Cap at 10
+		}
+		opts.Concurrency = c
+	}
+
+	if continueOnError, ok := req.GetArguments()["continue_on_error"].(bool); ok {
+		opts.ContinueOnError = continueOnError
+	}
+
+	if chunkConfig, ok := req.GetArguments()["chunk_config"].(map[string]any); ok {
+		opts.ChunkConfig = parseChunkConfig(chunkConfig)
+	}
+
+	result, err := s.knowledge.BulkIngest(ctx, namespace, collectionID, documents, opts)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(result)
 }
 
 func (s *Server) handleContextGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1072,6 +1225,23 @@ func (s *Server) handleEntitySearch(ctx context.Context, req mcp.CallToolRequest
 	}
 	if topK, ok := req.GetArguments()["top_k"].(float64); ok {
 		opts.TopK = int(topK)
+	}
+
+	// Parse search mode
+	if searchMode, ok := req.GetArguments()["search_mode"].(string); ok {
+		switch searchMode {
+		case "hybrid":
+			opts.SearchMode = entity.SearchModeHybrid
+		case "text":
+			opts.SearchMode = entity.SearchModeText
+		default:
+			opts.SearchMode = entity.SearchModeVector
+		}
+	}
+
+	// Parse alpha for hybrid search weighting
+	if alpha, ok := req.GetArguments()["alpha"].(float64); ok {
+		opts.Alpha = alpha
 	}
 
 	result, err := s.entity.Search(ctx, namespace, query, opts)

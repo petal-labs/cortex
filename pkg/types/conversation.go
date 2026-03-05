@@ -31,6 +31,7 @@ type Thread struct {
 type MessageResult struct {
 	Message  *Message `json:"message"`
 	Score    float64  `json:"score"`
+	Rank     int      `json:"rank,omitempty"` // Position in result set (for RRF)
 	ThreadID string   `json:"thread_id"`
 }
 

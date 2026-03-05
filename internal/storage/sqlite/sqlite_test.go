@@ -43,13 +43,13 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 
-	// Verify schema version
+	// Verify schema version (2 is current with FTS5 migration)
 	version, err := GetSchemaVersion(ctx, db)
 	if err != nil {
 		t.Fatalf("failed to get schema version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("expected schema version 1, got %d", version)
+	if version != 2 {
+		t.Errorf("expected schema version 2, got %d", version)
 	}
 
 	// Verify tables exist
@@ -92,13 +92,13 @@ func TestMigrationsIdempotent(t *testing.T) {
 		t.Fatalf("second migration failed: %v", err)
 	}
 
-	// Verify schema version is still 1
+	// Verify schema version is still 2 (current with FTS5)
 	version, err := GetSchemaVersion(ctx, db)
 	if err != nil {
 		t.Fatalf("failed to get schema version: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("expected schema version 1, got %d", version)
+	if version != 2 {
+		t.Errorf("expected schema version 2, got %d", version)
 	}
 }
 

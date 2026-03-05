@@ -1,0 +1,121 @@
+{{template "layout" .}}
+
+{{define "content"}}
+{{with .Content}}
+<div class="page-header">
+    <h1 class="page-title">{{.Entity.Name}}</h1>
+    <p class="page-subtitle">
+        <span class="entity-type entity-type-{{.Entity.Type}}">{{.Entity.Type}}</span>
+        {{if .Entity.Description}} - {{truncate .Entity.Description 100}}{{end}}
+    </p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card blue">
+        <div class="stat-value">{{.Entity.MentionCount}}</div>
+        <div class="stat-label">Mentions</div>
+    </div>
+    <div class="stat-card purple">
+        <div class="stat-value">{{len .Relationships}}</div>
+        <div class="stat-label">Relationships</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Entity Details</h2>
+    </div>
+    <div class="card-body">
+        <table style="width: 100%;">
+            <tr>
+                <td style="padding: 8px 0; width: 150px; color: var(--text-muted);">ID</td>
+                <td style="padding: 8px 0;"><code>{{.Entity.ID}}</code></td>
+            </tr>
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Type</td>
+                <td style="padding: 8px 0;">{{.Entity.Type}}</td>
+            </tr>
+            {{if .Entity.Description}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Description</td>
+                <td style="padding: 8px 0;">{{.Entity.Description}}</td>
+            </tr>
+            {{end}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Created</td>
+                <td style="padding: 8px 0;">{{timeAgo .Entity.CreatedAt}}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Updated</td>
+                <td style="padding: 8px 0;">{{timeAgo .Entity.UpdatedAt}}</td>
+            </tr>
+            {{if .Entity.Metadata}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Metadata</td>
+                <td style="padding: 8px 0;"><code>{{json .Entity.Metadata}}</code></td>
+            </tr>
+            {{end}}
+        </table>
+    </div>
+</div>
+
+{{if .Relationships}}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Relationships</h2>
+    </div>
+    <div class="card-body">
+        <div class="table-container" style="border: none;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Relationship</th>
+                        <th>Target</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Relationships}}
+                    <tr>
+                        <td>
+                            <span class="badge badge-purple">{{.Type}}</span>
+                        </td>
+                        <td>
+                            <a href="/entities/{{.TargetID}}">{{.TargetID}}</a>
+                        </td>
+                        <td style="color: var(--text-muted);">
+                            {{printf "%.0f%%" (mul .Confidence 100)}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{if .Mentions}}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Recent Mentions</h2>
+    </div>
+    <div class="card-body">
+        {{range .Mentions}}
+        <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius); margin-bottom: 8px;">
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">
+                {{.SourceType}} - {{timeAgo .CreatedAt}}
+            </div>
+            <div>{{truncate .Context 200}}</div>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}
+
+{{end}}
+
+<div style="margin-top: 24px;">
+    <a href="/entities" class="btn">Back to Entities</a>
+</div>
+{{end}}

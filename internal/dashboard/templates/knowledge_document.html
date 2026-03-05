@@ -1,0 +1,56 @@
+{{template "layout" .}}
+
+{{define "content"}}
+{{with .Content}}
+<div class="page-header">
+    <h1 class="page-title">{{.Title}}</h1>
+    <p class="page-subtitle">Document in collection</p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Document Details</h2>
+    </div>
+    <div class="card-body">
+        <table style="width: 100%;">
+            <tr>
+                <td style="padding: 8px 0; width: 150px; color: var(--text-muted);">ID</td>
+                <td style="padding: 8px 0;"><code>{{.ID}}</code></td>
+            </tr>
+            {{if .Source}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Source</td>
+                <td style="padding: 8px 0;">{{.Source}}</td>
+            </tr>
+            {{end}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Created</td>
+                <td style="padding: 8px 0;">{{timeAgo .CreatedAt}}</td>
+            </tr>
+            {{if .Metadata}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Metadata</td>
+                <td style="padding: 8px 0;"><code>{{json .Metadata}}</code></td>
+            </tr>
+            {{end}}
+        </table>
+    </div>
+</div>
+
+{{if .Content}}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Content</h2>
+    </div>
+    <div class="card-body">
+        <pre style="white-space: pre-wrap; word-break: break-word;">{{.Content}}</pre>
+    </div>
+</div>
+{{end}}
+
+{{end}}
+
+<div style="margin-top: 24px;">
+    <a href="/knowledge/collections" class="btn">Back to Collections</a>
+</div>
+{{end}}

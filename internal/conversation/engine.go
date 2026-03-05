@@ -235,11 +235,22 @@ func (e *Engine) History(ctx context.Context, namespace, threadID string, opts *
 	return result, nil
 }
 
+// SearchMode defines the type of search to perform.
+type SearchMode string
+
+const (
+	SearchModeVector SearchMode = "vector" // Vector similarity search only
+	SearchModeHybrid SearchMode = "hybrid" // Combined vector + full-text search (RRF)
+	SearchModeText   SearchMode = "text"   // Full-text search only (falls back to vector if unavailable)
+)
+
 // SearchOpts contains options for semantic search.
 type SearchOpts struct {
-	ThreadID *string // Optional: limit search to specific thread
-	TopK     int     // Number of results (0 = default 10)
-	MinScore float64 // Minimum similarity score (0-1)
+	ThreadID   *string    // Optional: limit search to specific thread
+	TopK       int        // Number of results (0 = default 10)
+	MinScore   float64    // Minimum similarity score (0-1)
+	SearchMode SearchMode // Search mode: "vector" (default), "hybrid", or "text"
+	Alpha      float64    // Hybrid search weight (0=pure text, 1=pure vector, 0.5=equal)
 }
 
 // SearchResult contains search results.
@@ -250,6 +261,7 @@ type SearchResult struct {
 
 // Search performs semantic search across messages in a namespace.
 // Requires semantic search to be enabled and embedding provider configured.
+// Supports vector (default), hybrid, or text search modes.
 func (e *Engine) Search(ctx context.Context, namespace, query string, opts *SearchOpts) (*SearchResult, error) {
 	if !e.cfg.SemanticSearchEnabled {
 		return nil, errors.New("semantic search is disabled")
@@ -267,26 +279,70 @@ func (e *Engine) Search(ctx context.Context, namespace, query string, opts *Sear
 		opts = &SearchOpts{}
 	}
 
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 10
+	}
+
 	// Generate query embedding
 	queryEmb, err := e.embedding.Embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
 
-	// Search messages
-	searchOpts := storage.MessageSearchOpts{
-		TopK:     opts.TopK,
-		MinScore: opts.MinScore,
-		ThreadID: opts.ThreadID,
-	}
+	var results []*types.MessageResult
 
-	if searchOpts.TopK <= 0 {
-		searchOpts.TopK = 10
-	}
+	// Choose search mode
+	switch opts.SearchMode {
+	case SearchModeHybrid:
+		// Use hybrid search (vector + full-text with RRF)
+		hybridOpts := storage.HybridSearchOpts{
+			TopK:     topK,
+			MinScore: opts.MinScore,
+			ThreadID: opts.ThreadID,
+			Alpha:    opts.Alpha,
+		}
+		if hybridOpts.Alpha == 0 {
+			hybridOpts.Alpha = 0.5 // Default to equal weight
+		}
+		results, err = e.storage.HybridSearchMessages(ctx, namespace, query, queryEmb, hybridOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hybrid search messages: %w", err)
+		}
 
-	results, err := e.storage.SearchMessages(ctx, namespace, queryEmb, searchOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search messages: %w", err)
+	case SearchModeText:
+		// Text-only mode: use hybrid with alpha=0 (pure text)
+		hybridOpts := storage.HybridSearchOpts{
+			TopK:     topK,
+			MinScore: opts.MinScore,
+			ThreadID: opts.ThreadID,
+			Alpha:    0.0, // Pure text search
+		}
+		results, err = e.storage.HybridSearchMessages(ctx, namespace, query, queryEmb, hybridOpts)
+		if err != nil {
+			// Fall back to vector search if hybrid not available
+			searchOpts := storage.MessageSearchOpts{
+				TopK:     topK,
+				MinScore: opts.MinScore,
+				ThreadID: opts.ThreadID,
+			}
+			results, err = e.storage.SearchMessages(ctx, namespace, queryEmb, searchOpts)
+			if err != nil {
+				return nil, fmt.Errorf("failed to search messages: %w", err)
+			}
+		}
+
+	default: // SearchModeVector or empty
+		// Pure vector search (original behavior)
+		searchOpts := storage.MessageSearchOpts{
+			TopK:     topK,
+			MinScore: opts.MinScore,
+			ThreadID: opts.ThreadID,
+		}
+		results, err = e.storage.SearchMessages(ctx, namespace, queryEmb, searchOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search messages: %w", err)
+		}
 	}
 
 	return &SearchResult{

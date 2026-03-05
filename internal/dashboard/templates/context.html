@@ -1,0 +1,44 @@
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="page-header">
+    <h1 class="page-title">Context</h1>
+    <p class="page-subtitle">View stored context key-value pairs</p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Context Store</h2>
+    </div>
+    <div class="card-body">
+        <p style="color: var(--text-muted); margin-bottom: 16px;">
+            The context store holds key-value pairs for maintaining state across conversations.
+            Context values are accessed by specific keys through the MCP tools.
+        </p>
+
+        <div class="empty-state" style="padding: 24px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <p>Context listing requires specific key lookup</p>
+            <p style="font-size: 12px;">Use the MCP tools to get/set context values by key</p>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Usage</h2>
+    </div>
+    <div class="card-body">
+        <p style="margin-bottom: 12px;">Available context operations:</p>
+        <ul style="padding-left: 20px; color: var(--text-secondary);">
+            <li><code>context_set</code> - Store a value with a key</li>
+            <li><code>context_get</code> - Retrieve a value by key</li>
+            <li><code>context_delete</code> - Remove a key-value pair</li>
+            <li><code>context_search</code> - Search context by semantic similarity</li>
+        </ul>
+    </div>
+</div>
+{{end}}

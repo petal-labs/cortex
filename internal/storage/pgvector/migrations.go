@@ -249,4 +249,26 @@ var migrationStatements = []string{
 
 	`CREATE INDEX IF NOT EXISTS idx_extraction_queue_status ON extraction_queue(status, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_extraction_queue_source ON extraction_queue(namespace, source_type, source_id)`,
+
+	// ==========================================================================
+	// Full-Text Search Support (tsvector columns and GIN indexes)
+	// ==========================================================================
+
+	// Messages FTS
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS content_tsvector tsvector
+		GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`,
+	`CREATE INDEX IF NOT EXISTS idx_messages_fts ON messages USING GIN (content_tsvector)`,
+
+	// Chunks FTS
+	`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS content_tsvector tsvector
+		GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`,
+	`CREATE INDEX IF NOT EXISTS idx_chunks_fts ON chunks USING GIN (content_tsvector)`,
+
+	// Entities FTS (name + summary)
+	`ALTER TABLE entities ADD COLUMN IF NOT EXISTS search_tsvector tsvector
+		GENERATED ALWAYS AS (
+			setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
+			setweight(to_tsvector('english', COALESCE(summary, '')), 'B')
+		) STORED`,
+	`CREATE INDEX IF NOT EXISTS idx_entities_fts ON entities USING GIN (search_tsvector)`,
 }

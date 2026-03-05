@@ -59,10 +59,15 @@ func (m *MockEmbeddingProvider) generateEmbedding(text string) []float32 {
 func setupTestEngine(t *testing.T) (*Engine, storage.Backend) {
 	t.Helper()
 
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite3", ":memory:?_foreign_keys=ON")
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
+
+	// SQLite requires single connection for in-memory databases
+	// to ensure all operations see the same data
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	backend := sqlite.NewWithDB(db)
 	if err := backend.Migrate(context.Background()); err != nil {
@@ -906,4 +911,190 @@ func TestExtractionEnqueuer(t *testing.T) {
 
 		_ = doc // Document retrieved successfully
 	})
+}
+
+func TestBulkIngest(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	documents := []BulkIngestDocument{
+		{
+			Content: "First document content about machine learning and AI.",
+			Title:   "Document 1",
+			Source:  "test://doc1",
+		},
+		{
+			Content: "Second document about programming languages and software.",
+			Title:   "Document 2",
+			Source:  "test://doc2",
+		},
+		{
+			Content: "Third document discussing database design patterns.",
+			Title:   "Document 3",
+			Metadata: map[string]string{"topic": "databases"},
+		},
+	}
+
+	result, err := engine.BulkIngest(ctx, namespace, col.ID, documents, nil)
+	if err != nil {
+		t.Fatalf("failed to bulk ingest: %v", err)
+	}
+
+	if result.TotalDocuments != 3 {
+		t.Errorf("expected 3 total documents, got %d", result.TotalDocuments)
+	}
+	if result.Succeeded != 3 {
+		t.Errorf("expected 3 succeeded, got %d", result.Succeeded)
+	}
+	if result.Failed != 0 {
+		t.Errorf("expected 0 failed, got %d", result.Failed)
+	}
+	if result.TotalChunks == 0 {
+		t.Error("expected at least some chunks")
+	}
+	if len(result.Documents) != 3 {
+		t.Errorf("expected 3 document results, got %d", len(result.Documents))
+	}
+
+	// Verify all documents succeeded
+	for i, docResult := range result.Documents {
+		if !docResult.Success {
+			t.Errorf("document %d failed: %s", i, docResult.Error)
+		}
+		if docResult.DocumentID == "" {
+			t.Errorf("document %d missing document ID", i)
+		}
+	}
+}
+
+func TestBulkIngestEmptyDocuments(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	_, err := engine.BulkIngest(ctx, namespace, col.ID, []BulkIngestDocument{}, nil)
+	if err == nil {
+		t.Error("expected error for empty documents")
+	}
+}
+
+func TestBulkIngestCollectionNotFound(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	documents := []BulkIngestDocument{
+		{Content: "test content"},
+	}
+
+	_, err := engine.BulkIngest(context.Background(), "ns", "nonexistent", documents, nil)
+	if err != ErrCollectionNotFound {
+		t.Errorf("expected ErrCollectionNotFound, got %v", err)
+	}
+}
+
+func TestBulkIngestWithEmptyContent(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	documents := []BulkIngestDocument{
+		{Content: "Valid document content"},
+		{Content: ""}, // Empty content should fail
+		{Content: "Another valid document"},
+	}
+
+	result, err := engine.BulkIngest(ctx, namespace, col.ID, documents, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Succeeded != 2 {
+		t.Errorf("expected 2 succeeded, got %d", result.Succeeded)
+	}
+	if result.Failed != 1 {
+		t.Errorf("expected 1 failed, got %d", result.Failed)
+	}
+
+	// Check that the empty content document has an error
+	if result.Documents[1].Success {
+		t.Error("expected document 1 to fail")
+	}
+	if result.Documents[1].Error == "" {
+		t.Error("expected error message for failed document")
+	}
+}
+
+func TestBulkIngestWithProgress(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	documents := []BulkIngestDocument{
+		{Content: "Document one", Title: "Doc 1"},
+		{Content: "Document two", Title: "Doc 2"},
+		{Content: "Document three", Title: "Doc 3"},
+	}
+
+	progressCalls := 0
+	opts := &BulkIngestOpts{
+		OnProgress: func(completed, total int, doc string) {
+			progressCalls++
+		},
+	}
+
+	result, err := engine.BulkIngest(ctx, namespace, col.ID, documents, opts)
+	if err != nil {
+		t.Fatalf("failed to bulk ingest: %v", err)
+	}
+
+	if progressCalls != result.TotalDocuments {
+		t.Errorf("expected %d progress calls, got %d", result.TotalDocuments, progressCalls)
+	}
+}
+
+func TestBulkIngestWithConcurrency(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	// Create more documents to test concurrency
+	documents := make([]BulkIngestDocument, 10)
+	for i := 0; i < 10; i++ {
+		documents[i] = BulkIngestDocument{
+			Content: "Test document content for concurrency testing number " + string(rune('A'+i)),
+			Title:   "Document " + string(rune('A'+i)),
+		}
+	}
+
+	opts := &BulkIngestOpts{
+		Concurrency: 4,
+	}
+
+	result, err := engine.BulkIngest(ctx, namespace, col.ID, documents, opts)
+	if err != nil {
+		t.Fatalf("failed to bulk ingest: %v", err)
+	}
+
+	if result.TotalDocuments != 10 {
+		t.Errorf("expected 10 total documents, got %d", result.TotalDocuments)
+	}
+	if result.Succeeded != 10 {
+		t.Errorf("expected 10 succeeded, got %d", result.Succeeded)
+	}
 }

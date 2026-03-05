@@ -307,11 +307,25 @@ func (e *Engine) List(ctx context.Context, namespace string, opts *ListOpts) (*L
 	}, nil
 }
 
+// SearchMode defines the search strategy.
+type SearchMode string
+
+const (
+	// SearchModeVector uses pure vector similarity search (default).
+	SearchModeVector SearchMode = "vector"
+	// SearchModeHybrid combines vector and text search with RRF.
+	SearchModeHybrid SearchMode = "hybrid"
+	// SearchModeText uses pure full-text search (BM25).
+	SearchModeText SearchMode = "text"
+)
+
 // SearchOpts contains options for entity search.
 type SearchOpts struct {
 	EntityType *types.EntityType // Filter by type
 	TopK       int               // Number of results (0 = default 10)
 	MinScore   float64           // Minimum similarity score (0-1)
+	SearchMode SearchMode        // Search mode: "vector" (default), "hybrid", or "text"
+	Alpha      float64           // Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)
 }
 
 // SearchResult contains search results.
@@ -323,10 +337,6 @@ type SearchResult struct {
 
 // Search performs semantic search across entity summaries.
 func (e *Engine) Search(ctx context.Context, namespace, query string, opts *SearchOpts) (*SearchResult, error) {
-	if e.embedding == nil {
-		return nil, ErrEmbeddingRequired
-	}
-
 	if query == "" {
 		return nil, ErrEmptyQuery
 	}
@@ -335,24 +345,77 @@ func (e *Engine) Search(ctx context.Context, namespace, query string, opts *Sear
 		opts = &SearchOpts{}
 	}
 
-	// Generate query embedding
-	queryEmb, err := e.embedding.Embed(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
-	}
-
 	topK := opts.TopK
 	if topK <= 0 {
 		topK = 10
 	}
 
-	searchOpts := storage.EntitySearchOpts{
-		TopK:       topK,
-		MinScore:   opts.MinScore,
-		EntityType: opts.EntityType,
+	// Set default alpha for hybrid search
+	alpha := opts.Alpha
+	if alpha == 0 && opts.SearchMode == SearchModeHybrid {
+		alpha = 0.5 // Default to equal weighting
 	}
 
-	results, err := e.storage.SearchEntities(ctx, namespace, queryEmb, searchOpts)
+	var results []*types.EntityResult
+	var err error
+
+	switch opts.SearchMode {
+	case SearchModeText:
+		// Pure text search - use hybrid with alpha=0 (pure text)
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		hybridOpts := storage.HybridEntitySearchOpts{
+			TopK:        topK,
+			MinScore:    opts.MinScore,
+			EntityType:  opts.EntityType,
+			Alpha:       0.0, // Pure text search
+			RRFConstant: 60,
+		}
+		results, err = e.storage.HybridSearchEntities(ctx, namespace, query, queryEmb, hybridOpts)
+
+	case SearchModeHybrid:
+		// Hybrid search combining vector and text
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		hybridOpts := storage.HybridEntitySearchOpts{
+			TopK:        topK,
+			MinScore:    opts.MinScore,
+			EntityType:  opts.EntityType,
+			Alpha:       alpha,
+			RRFConstant: 60,
+		}
+		results, err = e.storage.HybridSearchEntities(ctx, namespace, query, queryEmb, hybridOpts)
+
+	default:
+		// Pure vector search (default)
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		searchOpts := storage.EntitySearchOpts{
+			TopK:       topK,
+			MinScore:   opts.MinScore,
+			EntityType: opts.EntityType,
+		}
+		results, err = e.storage.SearchEntities(ctx, namespace, queryEmb, searchOpts)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to search entities: %w", err)
 	}

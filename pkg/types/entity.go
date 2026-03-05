@@ -76,6 +76,7 @@ const (
 type EntityResult struct {
 	Entity *Entity `json:"entity"`
 	Score  float64 `json:"score"`
+	Rank   int     `json:"rank,omitempty"` // Position in result set (for RRF)
 }
 
 // EntityQueryResponse represents the response from entity.query.

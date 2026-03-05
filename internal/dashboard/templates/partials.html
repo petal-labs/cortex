@@ -1,0 +1,72 @@
+{{define "search_results"}}
+{{if .Results}}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Search Results for "{{.Query}}"</h2>
+    </div>
+    <div class="card-body">
+        {{range .Results}}
+        <div style="padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius); margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <a href="/knowledge/documents/{{.DocumentID}}">{{if .DocumentTitle}}{{.DocumentTitle}}{{else}}Document{{end}}</a>
+                <span class="badge badge-green">Score: {{printf "%.2f" .Score}}</span>
+            </div>
+            <div style="color: var(--text-secondary); font-size: 13px;">
+                {{truncate .Content 300}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{else if .Query}}
+<div class="card">
+    <div class="card-body">
+        <p style="color: var(--text-muted); text-align: center;">No results found for "{{.Query}}"</p>
+    </div>
+</div>
+{{end}}
+{{end}}
+
+{{define "entity_search_results"}}
+{{if .Results}}
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Entity Search Results for "{{.Query}}"</h2>
+    </div>
+    <div class="card-body">
+        <div class="table-container" style="border: none;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Results}}
+                    <tr>
+                        <td>
+                            <a href="/entities/{{.Entity.ID}}">{{.Entity.Name}}</a>
+                        </td>
+                        <td>
+                            <span class="entity-type entity-type-{{.Entity.Type}}">{{.Entity.Type}}</span>
+                        </td>
+                        <td>
+                            <span class="badge badge-green">{{printf "%.2f" .Score}}</span>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{{else if .Query}}
+<div class="card">
+    <div class="card-body">
+        <p style="color: var(--text-muted); text-align: center;">No entities found for "{{.Query}}"</p>
+    </div>
+</div>
+{{end}}
+{{end}}

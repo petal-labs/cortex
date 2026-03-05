@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -235,6 +236,191 @@ func (e *Engine) Ingest(ctx context.Context, namespace, collectionID, content st
 	}, nil
 }
 
+// BulkIngestDocument represents a single document for bulk ingestion.
+type BulkIngestDocument struct {
+	Content     string            `json:"content"`
+	Title       string            `json:"title,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	ContentType string            `json:"content_type,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// BulkIngestOpts contains options for bulk document ingestion.
+type BulkIngestOpts struct {
+	ChunkConfig    *types.ChunkConfig                    // Override collection's default config
+	Concurrency    int                                   // Number of concurrent workers (0 = default 4)
+	OnProgress     func(completed, total int, doc string) // Optional progress callback
+	ContinueOnError bool                                  // Continue processing on individual document errors
+}
+
+// BulkIngestDocResult contains the result for a single document.
+type BulkIngestDocResult struct {
+	Index         int    `json:"index"`
+	DocumentID    string `json:"document_id,omitempty"`
+	Title         string `json:"title,omitempty"`
+	ChunksCreated int    `json:"chunks_created"`
+	Success       bool   `json:"success"`
+	Error         string `json:"error,omitempty"`
+}
+
+// BulkIngestResult contains the overall result of bulk ingestion.
+type BulkIngestResult struct {
+	CollectionID    string                 `json:"collection_id"`
+	TotalDocuments  int                    `json:"total_documents"`
+	Succeeded       int                    `json:"succeeded"`
+	Failed          int                    `json:"failed"`
+	TotalChunks     int                    `json:"total_chunks"`
+	Documents       []*BulkIngestDocResult `json:"documents"`
+}
+
+// BulkIngest ingests multiple documents into a collection with progress reporting.
+// Documents are processed concurrently for efficiency.
+func (e *Engine) BulkIngest(ctx context.Context, namespace, collectionID string, documents []BulkIngestDocument, opts *BulkIngestOpts) (*BulkIngestResult, error) {
+	if len(documents) == 0 {
+		return nil, errors.New("no documents provided")
+	}
+
+	// Verify collection exists
+	collection, err := e.storage.GetCollection(ctx, namespace, collectionID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, ErrCollectionNotFound
+		}
+		return nil, fmt.Errorf("failed to get collection: %w", err)
+	}
+
+	if opts == nil {
+		opts = &BulkIngestOpts{}
+	}
+
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 4
+	}
+	// Cap concurrency at document count
+	if concurrency > len(documents) {
+		concurrency = len(documents)
+	}
+
+	// Determine chunk config
+	chunkConfig := collection.ChunkConfig
+	if opts.ChunkConfig != nil {
+		chunkConfig = *opts.ChunkConfig
+	}
+
+	result := &BulkIngestResult{
+		CollectionID:   collectionID,
+		TotalDocuments: len(documents),
+		Documents:      make([]*BulkIngestDocResult, len(documents)),
+	}
+
+	// Create work channel and results channel
+	type workItem struct {
+		index int
+		doc   BulkIngestDocument
+	}
+
+	workCh := make(chan workItem, len(documents))
+	resultCh := make(chan *BulkIngestDocResult, len(documents))
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for work := range workCh {
+				docResult := e.ingestSingleDocument(ctx, namespace, collectionID, work.doc, work.index, chunkConfig)
+				resultCh <- docResult
+			}
+		}()
+	}
+
+	// Send work items
+	go func() {
+		for i, doc := range documents {
+			workCh <- workItem{index: i, doc: doc}
+		}
+		close(workCh)
+	}()
+
+	// Wait for workers and close result channel
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Collect results with progress reporting
+	completed := 0
+	for docResult := range resultCh {
+		result.Documents[docResult.Index] = docResult
+		completed++
+
+		if docResult.Success {
+			result.Succeeded++
+			result.TotalChunks += docResult.ChunksCreated
+		} else {
+			result.Failed++
+		}
+
+		// Report progress if callback provided
+		if opts.OnProgress != nil {
+			title := docResult.Title
+			if title == "" {
+				title = fmt.Sprintf("Document %d", docResult.Index+1)
+			}
+			opts.OnProgress(completed, len(documents), title)
+		}
+	}
+
+	return result, nil
+}
+
+// ingestSingleDocument ingests a single document and returns the result.
+func (e *Engine) ingestSingleDocument(ctx context.Context, namespace, collectionID string, doc BulkIngestDocument, index int, chunkConfig types.ChunkConfig) *BulkIngestDocResult {
+	result := &BulkIngestDocResult{
+		Index: index,
+		Title: doc.Title,
+	}
+
+	if doc.Content == "" {
+		result.Error = "empty content"
+		return result
+	}
+
+	ingestOpts := &IngestOpts{
+		Title:       doc.Title,
+		Source:      doc.Source,
+		ContentType: doc.ContentType,
+		Metadata:    doc.Metadata,
+		ChunkConfig: &chunkConfig,
+	}
+
+	ingestResult, err := e.Ingest(ctx, namespace, collectionID, doc.Content, ingestOpts)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+
+	result.DocumentID = ingestResult.DocumentID
+	result.ChunksCreated = ingestResult.ChunksCreated
+	result.Success = true
+
+	return result
+}
+
+// SearchMode defines the search strategy.
+type SearchMode string
+
+const (
+	// SearchModeVector uses pure vector similarity search (default).
+	SearchModeVector SearchMode = "vector"
+	// SearchModeHybrid combines vector and text search with RRF.
+	SearchModeHybrid SearchMode = "hybrid"
+	// SearchModeText uses pure full-text search (BM25).
+	SearchModeText SearchMode = "text"
+)
+
 // SearchOpts contains options for knowledge search.
 type SearchOpts struct {
 	CollectionID   *string           // Optional: limit to specific collection
@@ -242,6 +428,8 @@ type SearchOpts struct {
 	MinScore       float64           // Minimum similarity score (0-1)
 	Filters        map[string]string // Metadata filters
 	ContextWindow  int               // Chunks before/after to include (0 = none)
+	SearchMode     SearchMode        // Search mode: "vector" (default), "hybrid", or "text"
+	Alpha          float64           // Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)
 }
 
 // SearchResult contains search results with optional context.
@@ -253,10 +441,6 @@ type SearchResult struct {
 
 // Search performs semantic search across knowledge in a namespace.
 func (e *Engine) Search(ctx context.Context, namespace, query string, opts *SearchOpts) (*SearchResult, error) {
-	if e.embedding == nil {
-		return nil, ErrEmbeddingRequired
-	}
-
 	if query == "" {
 		return nil, errors.New("search query cannot be empty")
 	}
@@ -265,26 +449,80 @@ func (e *Engine) Search(ctx context.Context, namespace, query string, opts *Sear
 		opts = &SearchOpts{}
 	}
 
-	// Generate query embedding
-	queryEmb, err := e.embedding.Embed(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 10
 	}
 
-	// Configure search options
-	searchOpts := storage.ChunkSearchOpts{
-		TopK:         opts.TopK,
-		MinScore:     opts.MinScore,
-		CollectionID: opts.CollectionID,
-		Filters:      opts.Filters,
+	// Set default alpha for hybrid search
+	alpha := opts.Alpha
+	if alpha == 0 && opts.SearchMode == SearchModeHybrid {
+		alpha = 0.5 // Default to equal weighting
 	}
 
-	if searchOpts.TopK <= 0 {
-		searchOpts.TopK = 10
+	var results []*types.ChunkResult
+	var err error
+
+	switch opts.SearchMode {
+	case SearchModeText:
+		// Pure text search - use hybrid with alpha=0 (pure text)
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		hybridOpts := storage.HybridChunkSearchOpts{
+			TopK:         topK,
+			MinScore:     opts.MinScore,
+			CollectionID: opts.CollectionID,
+			Filters:      opts.Filters,
+			Alpha:        0.0, // Pure text search
+			RRFConstant:  60,
+		}
+		results, err = e.storage.HybridSearchChunks(ctx, namespace, query, queryEmb, hybridOpts)
+
+	case SearchModeHybrid:
+		// Hybrid search combining vector and text
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		hybridOpts := storage.HybridChunkSearchOpts{
+			TopK:         topK,
+			MinScore:     opts.MinScore,
+			CollectionID: opts.CollectionID,
+			Filters:      opts.Filters,
+			Alpha:        alpha,
+			RRFConstant:  60,
+		}
+		results, err = e.storage.HybridSearchChunks(ctx, namespace, query, queryEmb, hybridOpts)
+
+	default:
+		// Pure vector search (default)
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		searchOpts := storage.ChunkSearchOpts{
+			TopK:         topK,
+			MinScore:     opts.MinScore,
+			CollectionID: opts.CollectionID,
+			Filters:      opts.Filters,
+		}
+		results, err = e.storage.SearchChunks(ctx, namespace, queryEmb, searchOpts)
 	}
 
-	// Perform search
-	results, err := e.storage.SearchChunks(ctx, namespace, queryEmb, searchOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search chunks: %w", err)
 	}

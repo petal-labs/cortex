@@ -1,0 +1,82 @@
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="page-header">
+    <h1 class="page-title">Collections</h1>
+    <p class="page-subtitle">Browse your knowledge collections</p>
+</div>
+
+{{if .Error}}
+<div class="card" style="border-color: var(--accent-red);">
+    <div class="card-body" style="color: var(--accent-red);">
+        Error: {{.Error}}
+    </div>
+</div>
+{{else}}
+
+<div class="search-box">
+    <input type="text"
+           class="search-input"
+           placeholder="Search knowledge..."
+           name="q"
+           hx-get="/api/search/knowledge"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#search-results"
+           hx-indicator="#search-spinner">
+    <span id="search-spinner" class="htmx-indicator">
+        <span class="spinner"></span>
+    </span>
+</div>
+
+<div id="search-results"></div>
+
+{{define "knowledge_collections_list"}}
+{{with .Content}}
+{{if .}}
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Documents</th>
+                <th>Chunks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .}}
+            <tr>
+                <td>
+                    <a href="/knowledge/collections/{{.Collection.ID}}">{{.Collection.Name}}</a>
+                </td>
+                <td style="color: var(--text-secondary);">
+                    {{if .Collection.Description}}{{truncate .Collection.Description 60}}{{else}}-{{end}}
+                </td>
+                <td>
+                    {{if .Stats}}{{.Stats.DocumentCount}}{{else}}0{{end}}
+                </td>
+                <td>
+                    {{if .Stats}}{{.Stats.ChunkCount}}{{else}}0{{end}}
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+    </svg>
+    <p>No collections found</p>
+    <p style="font-size: 12px;">Create a collection using the MCP tools to get started</p>
+</div>
+{{end}}
+{{end}}
+{{end}}
+
+{{template "knowledge_collections_list" .}}
+
+{{end}}
+{{end}}

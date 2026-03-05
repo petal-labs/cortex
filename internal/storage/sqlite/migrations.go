@@ -221,6 +221,111 @@ CREATE INDEX IF NOT EXISTS idx_extraction_queue_status ON entity_extraction_queu
 INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', '1');
 `,
 	},
+	{
+		Version: 2,
+		Name:    "fts5_hybrid_search",
+		Up: `
+-- FTS5 virtual tables for hybrid search (vector + full-text)
+
+-- Messages full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    id UNINDEXED,
+    namespace UNINDEXED,
+    thread_id UNINDEXED,
+    content,
+    content='messages',
+    content_rowid='rowid'
+);
+
+-- Trigger to keep messages_fts in sync with messages
+CREATE TRIGGER IF NOT EXISTS messages_fts_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, id, namespace, thread_id, content)
+    VALUES (NEW.rowid, NEW.id, NEW.namespace, NEW.thread_id, NEW.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, id, namespace, thread_id, content)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.namespace, OLD.thread_id, OLD.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, id, namespace, thread_id, content)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.namespace, OLD.thread_id, OLD.content);
+    INSERT INTO messages_fts(rowid, id, namespace, thread_id, content)
+    VALUES (NEW.rowid, NEW.id, NEW.namespace, NEW.thread_id, NEW.content);
+END;
+
+-- Chunks full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    id UNINDEXED,
+    namespace UNINDEXED,
+    collection_id UNINDEXED,
+    document_id UNINDEXED,
+    content,
+    content='chunks',
+    content_rowid='rowid'
+);
+
+-- Trigger to keep chunks_fts in sync with chunks
+CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, id, namespace, collection_id, document_id, content)
+    VALUES (NEW.rowid, NEW.id, NEW.namespace, NEW.collection_id, NEW.document_id, NEW.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, id, namespace, collection_id, document_id, content)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.namespace, OLD.collection_id, OLD.document_id, OLD.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, id, namespace, collection_id, document_id, content)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.namespace, OLD.collection_id, OLD.document_id, OLD.content);
+    INSERT INTO chunks_fts(rowid, id, namespace, collection_id, document_id, content)
+    VALUES (NEW.rowid, NEW.id, NEW.namespace, NEW.collection_id, NEW.document_id, NEW.content);
+END;
+
+-- Entities full-text search (name + summary)
+CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(
+    id UNINDEXED,
+    namespace UNINDEXED,
+    name,
+    summary,
+    content='entities',
+    content_rowid='rowid'
+);
+
+-- Trigger to keep entities_fts in sync with entities
+CREATE TRIGGER IF NOT EXISTS entities_fts_insert AFTER INSERT ON entities BEGIN
+    INSERT INTO entities_fts(rowid, id, namespace, name, summary)
+    VALUES (NEW.rowid, NEW.id, NEW.namespace, NEW.name, COALESCE(NEW.summary, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS entities_fts_delete AFTER DELETE ON entities BEGIN
+    INSERT INTO entities_fts(entities_fts, rowid, id, namespace, name, summary)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.namespace, OLD.name, COALESCE(OLD.summary, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS entities_fts_update AFTER UPDATE ON entities BEGIN
+    INSERT INTO entities_fts(entities_fts, rowid, id, namespace, name, summary)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.namespace, OLD.name, COALESCE(OLD.summary, ''));
+    INSERT INTO entities_fts(rowid, id, namespace, name, summary)
+    VALUES (NEW.rowid, NEW.id, NEW.namespace, NEW.name, COALESCE(NEW.summary, ''));
+END;
+
+-- Populate FTS tables with existing data
+INSERT INTO messages_fts(rowid, id, namespace, thread_id, content)
+SELECT rowid, id, namespace, thread_id, content FROM messages;
+
+INSERT INTO chunks_fts(rowid, id, namespace, collection_id, document_id, content)
+SELECT rowid, id, namespace, collection_id, document_id, content FROM chunks;
+
+INSERT INTO entities_fts(rowid, id, namespace, name, summary)
+SELECT rowid, id, namespace, name, COALESCE(summary, '') FROM entities;
+
+-- Update schema version
+INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', '2');
+`,
+	},
 }
 
 // runMigrations executes all pending migrations.
@@ -247,9 +352,20 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
+	// Check FTS5 availability once
+	fts5Available := checkFTS5Available(ctx, db)
+
 	// Run pending migrations
 	for _, m := range migrations {
 		if m.Version <= currentVersion {
+			continue
+		}
+
+		// Skip FTS5 migration if FTS5 is not available
+		if m.Name == "fts5_hybrid_search" && !fts5Available {
+			// Record that we skipped FTS5 and update version
+			_, _ = db.ExecContext(ctx, "INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('fts5_available', 'false')")
+			_, _ = db.ExecContext(ctx, "INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', ?)", m.Version)
 			continue
 		}
 
@@ -270,12 +386,42 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("failed to update schema version: %w", err)
 		}
 
+		// Record FTS5 as available if we successfully ran the FTS5 migration
+		if m.Name == "fts5_hybrid_search" {
+			if _, err := tx.ExecContext(ctx, "INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('fts5_available', 'true')"); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to record fts5 availability: %w", err)
+			}
+		}
+
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit migration: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// checkFTS5Available tests if FTS5 module is available in this SQLite build.
+func checkFTS5Available(ctx context.Context, db *sql.DB) bool {
+	// Try to create a temporary FTS5 table to check availability
+	_, err := db.ExecContext(ctx, "CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_check USING fts5(test)")
+	if err != nil {
+		return false
+	}
+	// Clean up the test table
+	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS _fts5_check")
+	return true
+}
+
+// IsFTS5Available checks if FTS5 was successfully initialized.
+func IsFTS5Available(ctx context.Context, db *sql.DB) bool {
+	var value string
+	row := db.QueryRowContext(ctx, "SELECT value FROM cortex_metadata WHERE key = 'fts5_available'")
+	if err := row.Scan(&value); err != nil {
+		return false
+	}
+	return value == "true"
 }
 
 // GetSchemaVersion returns the current schema version.

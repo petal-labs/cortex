@@ -538,9 +538,10 @@ cortex gc --dry-run
 - [x] Backup & Export
 
 ### Phase 4: Ecosystem Integration
-- [ ] Hybrid Search
-- [ ] Bulk Ingest
-- [ ] PetalFlow UI Integration
+- [x] Hybrid Search (FTS5 + sqlite-vec, tsvector + pgvector)
+- [x] Bulk Ingest (concurrent workers, progress callbacks)
+- [x] Web Dashboard (Cortex-specific UI)
+- [x] Terminal UI (TUI with Bubble Tea)
 
 ---
 
@@ -551,3 +552,85 @@ None yet.
 - Project follows the Cortex FRD specification exactly
 - Each phase has verification tests before moving forward
 - Phase 3 Production Hardening is complete
+
+### 2026-03-04 - Phase 4 Ecosystem Integration
+
+**Milestone 4.1 Completed (Hybrid Search):**
+- FTS5 full-text search integrated with SQLite
+  - fts5 virtual tables for messages, chunks, and entities
+  - Triggers for automatic FTS index maintenance
+  - BM25 scoring combined with cosine similarity
+  - Three search modes: vector, fts, hybrid (RRF fusion)
+- tsvector full-text search integrated with pgvector
+  - tsvector columns with GIN indexes
+  - ts_rank scoring combined with cosine similarity
+  - Same three search modes for feature parity
+- MCP tools updated with search_mode parameter
+
+**New/Modified Files:**
+- `internal/storage/sqlite/fts.go` - FTS5 schema and migrations
+- `internal/storage/sqlite/fts_search.go` - Hybrid search implementation
+- `internal/storage/pgvector/fts.go` - tsvector schema and migrations
+- `internal/storage/pgvector/fts_search.go` - Hybrid search implementation
+- `internal/server/mcp.go` - Updated search handlers for mode parameter
+
+**Milestone 4.2 Completed (Bulk Ingest):**
+- BulkIngest method added to knowledge engine
+  - Concurrent worker pool with configurable concurrency
+  - Progress callbacks for UI integration
+  - Batch processing with error collection
+- MCP tool `knowledge_bulk_ingest` for batch document ingestion
+- Fixed SQLite in-memory concurrency issue (SetMaxOpenConns(1))
+
+**Milestone 4.3 Completed (Web Dashboard):**
+- Cortex-specific web dashboard (not PetalFlow integration)
+- Go embedded templates and static files
+- Dark theme with clean, minimal design
+- HTMX-powered real-time search
+
+**Dashboard Features:**
+- Home: Overview with stats (collections, documents, conversations, entities)
+- Knowledge: Collections list, collection detail, document viewer, search
+- Conversations: Thread list, conversation detail with messages
+- Context: Inspector placeholder (no list method available)
+- Entities: Entity list, entity detail with relationships and mentions, search
+
+**New Files:**
+- `internal/dashboard/dashboard.go` - Server, embedded files, template helpers
+- `internal/dashboard/handlers.go` - HTTP handlers for all pages
+- `internal/dashboard/static/style.css` - Dark theme CSS
+- `internal/dashboard/templates/*.html` - 10 HTML templates
+
+**Dashboard Stack:**
+- Go html/template with embedded files (//go:embed)
+- HTMX 1.9.10 for interactive search
+- CSS custom properties for theming
+- No JavaScript framework dependencies
+
+**Milestone 4.4 Completed (Terminal UI):**
+- Terminal UI implemented using Bubble Tea framework
+- Dark theme matching the web dashboard colors
+- Vim-style navigation (j/k for up/down)
+- Number keys (1-5) for quick section switching
+
+**TUI Features:**
+- Dashboard: Overview with stats for all memory primitives
+- Knowledge: Collection list with document counts, detail view
+- Conversations: Thread list with messages viewer
+- Context: Info page (no list API available)
+- Entities: Entity list with relationships and mentions detail
+
+**New Files:**
+- `internal/tui/tui.go` - Main app model, navigation, view routing
+- `internal/tui/styles.go` - Lipgloss styles matching web dashboard theme
+- `internal/tui/helpers.go` - Helper functions (timeAgo, truncate)
+- `internal/tui/dashboard.go` - Dashboard view with stats loading
+- `internal/tui/knowledge.go` - Knowledge browser with collection detail
+- `internal/tui/conversation.go` - Conversation viewer with messages
+- `internal/tui/entity.go` - Entity explorer with relationships/mentions
+- `internal/cmd/tui.go` - CLI command to launch TUI
+
+**TUI Stack:**
+- charmbracelet/bubbletea v1.3.10 - Elm architecture TUI framework
+- charmbracelet/lipgloss v1.1.0 - Declarative terminal styling
+- charmbracelet/bubbles v1.0.0 - Pre-built TUI components

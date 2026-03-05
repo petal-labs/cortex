@@ -1,0 +1,82 @@
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="page-header">
+    <h1 class="page-title">Entities</h1>
+    <p class="page-subtitle">Extracted entities and their relationships</p>
+</div>
+
+{{if .Error}}
+<div class="card" style="border-color: var(--accent-red);">
+    <div class="card-body" style="color: var(--accent-red);">
+        Error: {{.Error}}
+    </div>
+</div>
+{{else}}
+
+<div class="search-box">
+    <input type="text"
+           class="search-input"
+           placeholder="Search entities..."
+           name="q"
+           hx-get="/api/search/entities"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#entity-search-results"
+           hx-indicator="#entity-search-spinner">
+    <span id="entity-search-spinner" class="htmx-indicator">
+        <span class="spinner"></span>
+    </span>
+</div>
+
+<div id="entity-search-results"></div>
+
+{{with .Content}}
+{{if .}}
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Mentions</th>
+                <th>Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .}}
+            <tr>
+                <td>
+                    <a href="/entities/{{.ID}}">{{.Name}}</a>
+                </td>
+                <td>
+                    <span class="entity-type entity-type-{{.Type}}">
+                        {{.Type}}
+                    </span>
+                </td>
+                <td>
+                    <span class="badge">{{.MentionCount}}</span>
+                </td>
+                <td style="color: var(--text-muted);">
+                    {{timeAgo .UpdatedAt}}
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{else}}
+<div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+    <p>No entities found</p>
+    <p style="font-size: 12px;">Entities are extracted from conversations and documents</p>
+</div>
+{{end}}
+{{end}}
+
+{{end}}
+{{end}}

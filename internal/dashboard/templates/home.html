@@ -1,0 +1,44 @@
+{{template "layout" .}}
+
+{{define "content"}}
+<div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">Overview of your Cortex memory system</p>
+</div>
+
+{{with .Content}}
+<div class="stats-grid">
+    <div class="stat-card blue">
+        <div class="stat-value">{{.Collections}}</div>
+        <div class="stat-label">Collections</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-value">{{.Documents}}</div>
+        <div class="stat-label">Documents</div>
+    </div>
+    <div class="stat-card purple">
+        <div class="stat-value">{{.Conversations}}</div>
+        <div class="stat-label">Conversations</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-value">{{.Entities}}</div>
+        <div class="stat-label">Entities</div>
+    </div>
+</div>
+{{end}}
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Quick Actions</h2>
+    </div>
+    <div class="card-body">
+        <p>Use the sidebar to navigate between different sections of your memory system.</p>
+        <ul style="margin-top: 12px; padding-left: 20px;">
+            <li><strong>Knowledge</strong> - Browse and search your document collections</li>
+            <li><strong>Conversations</strong> - View conversation threads and messages</li>
+            <li><strong>Context</strong> - Inspect stored context key-value pairs</li>
+            <li><strong>Entities</strong> - Explore extracted entities and relationships</li>
+        </ul>
+    </div>
+</div>
+{{end}}

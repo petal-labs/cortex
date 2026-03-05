@@ -30,6 +30,9 @@ type Backend interface {
 	// Entity memory operations
 	EntityStorage
 
+	// Hybrid search operations (optional)
+	HybridSearch
+
 	// Lifecycle operations
 	Lifecycle
 
@@ -118,6 +121,47 @@ type ChunkSearchOpts struct {
 	MinScore     float64
 	CollectionID *string           // Optional: limit to a specific collection
 	Filters      map[string]string // Metadata filters
+}
+
+// HybridSearch defines operations for combined vector + full-text search.
+// Uses Reciprocal Rank Fusion (RRF) to combine results from both search methods.
+type HybridSearch interface {
+	// HybridSearchMessages performs combined vector and full-text search on messages.
+	HybridSearchMessages(ctx context.Context, namespace string, query string, embedding []float32, opts HybridSearchOpts) ([]*types.MessageResult, error)
+
+	// HybridSearchChunks performs combined vector and full-text search on chunks.
+	HybridSearchChunks(ctx context.Context, namespace string, query string, embedding []float32, opts HybridChunkSearchOpts) ([]*types.ChunkResult, error)
+
+	// HybridSearchEntities performs combined vector and full-text search on entities.
+	HybridSearchEntities(ctx context.Context, namespace string, query string, embedding []float32, opts HybridEntitySearchOpts) ([]*types.EntityResult, error)
+}
+
+// HybridSearchOpts configures hybrid message search behavior.
+type HybridSearchOpts struct {
+	TopK        int
+	MinScore    float64
+	ThreadID    *string // Optional: limit to a specific thread
+	Alpha       float64 // Weight for vector vs text (0=pure text, 1=pure vector, 0.5=equal)
+	RRFConstant float64 // RRF constant k (default: 60)
+}
+
+// HybridChunkSearchOpts configures hybrid chunk search behavior.
+type HybridChunkSearchOpts struct {
+	TopK         int
+	MinScore     float64
+	CollectionID *string           // Optional: limit to a specific collection
+	Filters      map[string]string // Metadata filters
+	Alpha        float64           // Weight for vector vs text (0=pure text, 1=pure vector, 0.5=equal)
+	RRFConstant  float64           // RRF constant k (default: 60)
+}
+
+// HybridEntitySearchOpts configures hybrid entity search behavior.
+type HybridEntitySearchOpts struct {
+	TopK        int
+	MinScore    float64
+	EntityType  *types.EntityType
+	Alpha       float64 // Weight for vector vs text (0=pure text, 1=pure vector, 0.5=equal)
+	RRFConstant float64 // RRF constant k (default: 60)
 }
 
 // ContextStorage defines operations for workflow context.

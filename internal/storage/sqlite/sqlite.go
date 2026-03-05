@@ -124,6 +124,11 @@ func (b *Backend) Migrate(ctx context.Context) error {
 	return runMigrations(ctx, b.db)
 }
 
+// FTS5Available checks if FTS5 full-text search is available.
+func (b *Backend) FTS5Available(ctx context.Context) bool {
+	return IsFTS5Available(ctx, b.db)
+}
+
 // Transaction helper for executing operations in a transaction.
 func (b *Backend) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := b.db.BeginTx(ctx, nil)

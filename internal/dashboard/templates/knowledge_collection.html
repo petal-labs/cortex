@@ -1,0 +1,77 @@
+{{template "layout" .}}
+
+{{define "content"}}
+{{with .Content}}
+<div class="page-header">
+    <h1 class="page-title">{{.Collection.Name}}</h1>
+    {{if .Collection.Description}}
+    <p class="page-subtitle">{{.Collection.Description}}</p>
+    {{end}}
+</div>
+
+<div class="stats-grid">
+    {{if .Stats}}
+    <div class="stat-card blue">
+        <div class="stat-value">{{.Stats.DocumentCount}}</div>
+        <div class="stat-label">Documents</div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-value">{{.Stats.ChunkCount}}</div>
+        <div class="stat-label">Chunks</div>
+    </div>
+    {{end}}
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Collection Details</h2>
+    </div>
+    <div class="card-body">
+        <table style="width: 100%;">
+            <tr>
+                <td style="padding: 8px 0; width: 150px; color: var(--text-muted);">ID</td>
+                <td style="padding: 8px 0;"><code>{{.Collection.ID}}</code></td>
+            </tr>
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Created</td>
+                <td style="padding: 8px 0;">{{timeAgo .Collection.CreatedAt}}</td>
+            </tr>
+            {{if .Collection.Metadata}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Metadata</td>
+                <td style="padding: 8px 0;"><code>{{json .Collection.Metadata}}</code></td>
+            </tr>
+            {{end}}
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Search Documents</h2>
+    </div>
+    <div class="card-body">
+        <div class="search-box" style="margin-bottom: 0;">
+            <input type="text"
+                   class="search-input"
+                   placeholder="Search within this collection..."
+                   name="q"
+                   hx-get="/api/search/knowledge"
+                   hx-trigger="keyup changed delay:300ms"
+                   hx-target="#doc-search-results"
+                   hx-indicator="#doc-search-spinner">
+            <span id="doc-search-spinner" class="htmx-indicator">
+                <span class="spinner"></span>
+            </span>
+        </div>
+    </div>
+</div>
+
+<div id="doc-search-results"></div>
+
+{{end}}
+
+<div style="margin-top: 24px;">
+    <a href="/knowledge/collections" class="btn">Back to Collections</a>
+</div>
+{{end}}

@@ -1,0 +1,69 @@
+{{template "layout" .}}
+
+{{define "content"}}
+{{with .Content}}
+<div class="page-header">
+    <h1 class="page-title">{{if .Thread.Title}}{{.Thread.Title}}{{else}}Untitled Conversation{{end}}</h1>
+    <p class="page-subtitle">
+        {{if .Thread.AgentID}}Agent: {{.Thread.AgentID}}{{end}}
+        {{if .Thread.Summary}} - {{truncate .Thread.Summary 80}}{{end}}
+    </p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Thread Details</h2>
+    </div>
+    <div class="card-body">
+        <table style="width: 100%;">
+            <tr>
+                <td style="padding: 8px 0; width: 150px; color: var(--text-muted);">ID</td>
+                <td style="padding: 8px 0;"><code>{{.Thread.ID}}</code></td>
+            </tr>
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Created</td>
+                <td style="padding: 8px 0;">{{timeAgo .Thread.CreatedAt}}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Updated</td>
+                <td style="padding: 8px 0;">{{timeAgo .Thread.UpdatedAt}}</td>
+            </tr>
+            {{if .Thread.Metadata}}
+            <tr>
+                <td style="padding: 8px 0; color: var(--text-muted);">Metadata</td>
+                <td style="padding: 8px 0;"><code>{{json .Thread.Metadata}}</code></td>
+            </tr>
+            {{end}}
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Messages</h2>
+    </div>
+    <div class="card-body">
+        {{if .Messages}}
+        {{range .Messages}}
+        <div class="message message-{{.Role}}">
+            <div class="message-header">
+                <span class="message-role">{{.Role}}</span>
+                <span>{{timeAgo .CreatedAt}}</span>
+            </div>
+            <div class="message-content">{{.Content}}</div>
+        </div>
+        {{end}}
+        {{else}}
+        <div class="empty-state" style="padding: 24px;">
+            <p>No messages in this conversation</p>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+{{end}}
+
+<div style="margin-top: 24px;">
+    <a href="/conversations" class="btn">Back to Conversations</a>
+</div>
+{{end}}

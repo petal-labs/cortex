@@ -1,5 +1,10 @@
 # Cortex
 
+[![Build Status](https://github.com/petal-labs/cortex/actions/workflows/ci.yml/badge.svg)](https://github.com/petal-labs/cortex/actions/workflows/ci.yml)&nbsp;
+[![Go Report Card](https://goreportcard.com/badge/github.com/petal-labs/cortex?style=flat)](https://goreportcard.com/report/github.com/petal-labs/cortex)&nbsp;
+[![GoDoc](https://godoc.org/github.com/petal-labs/cortex?status.svg)](https://godoc.org/github.com/petal-labs/cortex)&nbsp;
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/petal-labs/cortex/blob/main/LICENSE)
+
 Cortex is a memory and knowledge service for AI agents. It provides persistent context, vector-backed knowledge retrieval, and conversation memory through the Model Context Protocol (MCP).
 
 ## Features

@@ -27,7 +27,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dbPath := filepath.Join(tmpDir, "cortex.db")
 	fmt.Printf("Using database: %s\n\n", dbPath)
@@ -41,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Run migrations
 	if err := store.Migrate(ctx); err != nil {

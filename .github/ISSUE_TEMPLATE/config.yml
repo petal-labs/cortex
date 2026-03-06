@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/petal-labs/cortex#readme
+    about: Check the README for usage guides and configuration options
+  - name: Security Vulnerability
+    url: https://github.com/petal-labs/cortex/security/advisories/new
+    about: Report security vulnerabilities privately

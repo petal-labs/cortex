@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "kind": "agent",
+  "id": "cortex-support-agent",
+  "name": "Customer Support Agent with Cortex Tools",
+  "agents": {
+    "support": {
+      "role": "Customer Support Specialist",
+      "goal": "Help customers by searching the knowledge base, maintaining conversation context, and providing accurate, helpful responses",
+      "backstory": "You are an expert customer support agent with access to a comprehensive knowledge base. You use Cortex tools to search documentation, remember conversation context, and provide consistent, accurate support.",
+      "provider": "ollama",
+      "model": "llama3.2",
+      "tools": ["cortex_knowledge_search", "cortex_context_get", "cortex_context_set"],
+      "config": {
+        "temperature": 0.3,
+        "max_tokens": 2000
+      }
+    },
+    "summarizer": {
+      "role": "Conversation Summarizer",
+      "goal": "Create concise summaries of support interactions for future reference",
+      "backstory": "You specialize in distilling conversations into key points, action items, and outcomes for record-keeping.",
+      "provider": "ollama",
+      "model": "llama3.2",
+      "tools": ["cortex_context_set"],
+      "config": {
+        "temperature": 0.2,
+        "max_tokens": 500
+      }
+    }
+  },
+  "tasks": {
+    "handle_query": {
+      "description": "Handle the customer support query: {{input.query}}\n\nFirst, search the knowledge base for relevant information using cortex_knowledge_search.\nThen check for any previous context about this customer using cortex_context_get with key 'customer_{{input.customer_id}}'.\nProvide a helpful, accurate response based on the documentation and context.",
+      "agent": "support",
+      "expected_output": "A helpful, accurate response to the customer query with citations to relevant documentation when applicable",
+      "output_key": "response"
+    },
+    "save_context": {
+      "description": "Summarize this support interaction and save it for future reference:\n\nCustomer Query: {{input.query}}\nResponse: {{tasks.handle_query.output}}\n\nUse cortex_context_set to save a summary with key 'customer_{{input.customer_id}}' that includes: the topic discussed, any issues identified, and the resolution provided.",
+      "agent": "summarizer",
+      "expected_output": "Confirmation that the interaction summary was saved to Cortex context",
+      "output_key": "summary_saved",
+      "context": ["handle_query"]
+    }
+  },
+  "execution": {
+    "strategy": "sequential",
+    "task_order": ["handle_query", "save_context"]
+  }
+}

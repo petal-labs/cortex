@@ -108,7 +108,7 @@ jobs:
       - name: Run gosec
         uses: securego/gosec@v2.22.11
         with:
-          args: -exclude=G101,G104,G201,G202,G301,G304,G306,G404,G602,G704 -exclude-dir=.git -exclude-dir=vendor -exclude-dir=examples/petalflow-research-agent -exclude-dir=examples/petalflow-graph ./...
+          args: -exclude=G101,G104,G201,G202,G301,G304,G306,G404,G602,G704 -exclude-dir=.git -exclude-dir=vendor -exclude-dir=examples/petalflow-research-agent -exclude-dir=examples/petalflow-graph -exclude-dir=examples/petalflow-agent-tools ./...
 
   build:
     name: Build Binary

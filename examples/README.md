@@ -11,6 +11,7 @@ This directory contains examples demonstrating how to use Cortex in various scen
 | [go-client](./go-client/) | Using Cortex programmatically as a Go library |
 | [petalflow-research-agent](./petalflow-research-agent/) | Multi-agent research workflow using PetalFlow Agent/Task schema |
 | [petalflow-graph](./petalflow-graph/) | Building workflow graphs programmatically with PetalFlow |
+| [petalflow-agent-tools](./petalflow-agent-tools/) | Using Cortex as a tool provider for PetalFlow agents |
 
 ## Quick Start
 

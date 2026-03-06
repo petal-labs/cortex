@@ -1,0 +1,69 @@
+{
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "kind": "agent",
+  "id": "cortex-research-workflow",
+  "name": "Research Workflow with Cortex Knowledge Store",
+  "agents": {
+    "researcher": {
+      "role": "Research Analyst",
+      "goal": "Search the knowledge base and gather relevant information to answer user queries",
+      "backstory": "You are an expert researcher who excels at finding and synthesizing information from document collections. You use the Cortex knowledge store to retrieve relevant context.",
+      "provider": "ollama",
+      "model": "llama3.2",
+      "tools": ["cortex_search"],
+      "config": {
+        "temperature": 0.3,
+        "max_tokens": 2000
+      }
+    },
+    "analyst": {
+      "role": "Content Analyst",
+      "goal": "Analyze retrieved information and extract key insights, patterns, and actionable recommendations",
+      "backstory": "You are a skilled analyst who can identify patterns, synthesize multiple sources, and provide clear, actionable insights.",
+      "provider": "ollama",
+      "model": "llama3.2",
+      "config": {
+        "temperature": 0.5,
+        "max_tokens": 3000
+      }
+    },
+    "writer": {
+      "role": "Technical Writer",
+      "goal": "Create clear, well-structured reports from analyzed information",
+      "backstory": "You are an expert technical writer who transforms complex analysis into readable, well-organized documents with clear structure and actionable conclusions.",
+      "provider": "ollama",
+      "model": "llama3.2",
+      "config": {
+        "temperature": 0.7,
+        "max_tokens": 4000
+      }
+    }
+  },
+  "tasks": {
+    "research": {
+      "description": "Search the Cortex knowledge base for information related to: {{input.query}}. Use the cortex_search tool to find relevant documents and context. Gather all relevant information that could help answer the query.",
+      "agent": "researcher",
+      "expected_output": "A comprehensive collection of relevant information, quotes, and references from the knowledge base that relate to the query",
+      "output_key": "research_findings"
+    },
+    "analyze": {
+      "description": "Analyze the research findings and identify key themes, patterns, and insights:\n\n{{tasks.research.output}}\n\nExtract the most important points and identify any gaps or contradictions in the information.",
+      "agent": "analyst",
+      "expected_output": "A structured analysis with key themes, important insights, patterns identified, and any notable gaps in the information",
+      "output_key": "analysis",
+      "context": ["research"]
+    },
+    "report": {
+      "description": "Create a well-structured report based on the analysis:\n\nOriginal Query: {{input.query}}\n\nAnalysis:\n{{tasks.analyze.output}}\n\nWrite a clear, professional report with an executive summary, main findings, and recommendations.",
+      "agent": "writer",
+      "expected_output": "A professional report with executive summary, detailed findings organized by theme, and actionable recommendations",
+      "output_key": "final_report",
+      "context": ["analyze"]
+    }
+  },
+  "execution": {
+    "strategy": "sequential",
+    "task_order": ["research", "analyze", "report"]
+  }
+}

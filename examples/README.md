@@ -9,6 +9,8 @@ This directory contains examples demonstrating how to use Cortex in various scen
 | [cli-basics](./cli-basics/) | Command-line usage patterns for common tasks |
 | [claude-desktop](./claude-desktop/) | Integration with Claude Desktop via MCP |
 | [go-client](./go-client/) | Using Cortex programmatically as a Go library |
+| [petalflow-research-agent](./petalflow-research-agent/) | Multi-agent research workflow using PetalFlow Agent/Task schema |
+| [petalflow-graph](./petalflow-graph/) | Building workflow graphs programmatically with PetalFlow |
 
 ## Quick Start
 
@@ -52,3 +54,23 @@ Track project state and context across coding sessions:
 cortex context set "current_task" "implementing user auth"
 cortex context set "project_status" '{"phase": "development", "sprint": 3}'
 ```
+
+### AI Agent Workflows with PetalFlow
+
+Build sophisticated multi-agent workflows using [PetalFlow](https://github.com/petal-labs/petalflow):
+
+```go
+// Use the Agent/Task schema for declarative workflows
+wf, _ := agent.LoadFromFile("research_workflow.json")
+graphDef, _ := agent.Compile(wf)
+graph, _ := hydrate.Hydrate(graphDef, opts)
+
+// Or build graphs programmatically
+builder := petalflow.NewGraphBuilder("qa-workflow")
+builder.AddNode(searchNode)
+builder.Edge(prepareNode)
+builder.Edge(generateNode)
+graph, _ := builder.Build()
+```
+
+See the [petalflow-research-agent](./petalflow-research-agent/) and [petalflow-graph](./petalflow-graph/) examples for complete implementations.

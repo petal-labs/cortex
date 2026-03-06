@@ -32,16 +32,60 @@ Cortex is a memory and knowledge service for AI agents. It provides persistent c
 
 ## Installation
 
+### Download Binary
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/petal-labs/cortex/releases/latest).
+
+**Linux (amd64):**
+
 ```bash
-go install github.com/petal-labs/cortex/cmd/cortex@latest
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_linux_amd64.tar.gz
+tar -xzf cortex_0.1.0_linux_amd64.tar.gz
+sudo mv cortex_0.1.0_linux_amd64/cortex /usr/local/bin/
 ```
 
-Or build from source:
+**Linux (arm64):**
+
+```bash
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_linux_arm64.tar.gz
+tar -xzf cortex_0.1.0_linux_arm64.tar.gz
+sudo mv cortex_0.1.0_linux_arm64/cortex /usr/local/bin/
+```
+
+**macOS (Apple Silicon):**
+
+```bash
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_arm64.tar.gz
+tar -xzf cortex_0.1.0_darwin_arm64.tar.gz
+sudo mv cortex_0.1.0_darwin_arm64/cortex /usr/local/bin/
+```
+
+**macOS (Intel):**
+
+```bash
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_amd64.tar.gz
+tar -xzf cortex_0.1.0_darwin_amd64.tar.gz
+sudo mv cortex_0.1.0_darwin_amd64/cortex /usr/local/bin/
+```
+
+**Windows:**
+
+Download `cortex_0.1.0_windows_amd64.zip` from [releases](https://github.com/petal-labs/cortex/releases/latest), extract, and add to your PATH.
+
+### Build from Source
+
+Requires Go 1.24+ and CGO enabled.
 
 ```bash
 git clone https://github.com/petal-labs/cortex.git
 cd cortex
 go build -o cortex ./cmd/cortex
+```
+
+### Verify Installation
+
+```bash
+cortex --version
 ```
 
 ## Quick Start

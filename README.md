@@ -6,11 +6,11 @@
 </div>
 <div>
   <p>
-    <a href="https://github.com/petal-labs/cortex/actions/workflows/ci.yml"><img src="https://github.com/petal-labs/cortex/actions/workflows/ci.yml/badge.svg" alt-"Build Status"></a>
-    <a href="https://goreportcard.com/report/github.com/petal-labs/cortex"><img src="https://goreportcard.com/badge/github.com/petal-labs/cortex?style=flat" alt="Go Report Card"></a>
-    <a href="https://godoc.org/github.com/petal-labs/cortex"><img src="https://godoc.org/github.com/petal-labs/cortex?status.svg" alt="GoDoc"></a>
-    <a href="https://github.com/petal-labs/cortex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-    <a href="https://github.com/petal-labs/cortex/releases"><img src="https://img.shields.io/github/v/release/petal-labs/cortex?include_prereleases&style=flat" alt="GitHub release"></a>
+    <a href="https://github.com/petal-labs/cortex/actions/workflows/ci.yml"><img src="https://github.com/petal-labs/cortex/actions/workflows/ci.yml/badge.svg" alt-"Build Status"></a>&nbsp;
+    <a href="https://goreportcard.com/report/github.com/petal-labs/cortex"><img src="https://goreportcard.com/badge/github.com/petal-labs/cortex?style=flat" alt="Go Report Card"></a>&nbsp;
+    <a href="https://godoc.org/github.com/petal-labs/cortex"><img src="https://godoc.org/github.com/petal-labs/cortex?status.svg" alt="GoDoc"></a>&nbsp;
+    <a href="https://github.com/petal-labs/cortex/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>&nbsp;
+    <a href="https://github.com/petal-labs/cortex/releases"><img src="https://img.shields.io/github/v/release/petal-labs/cortex?include_prereleases&style=flat" alt="GitHub release"></a>&nbsp;
  </p>
 </div>
 

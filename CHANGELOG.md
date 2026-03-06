@@ -5,6 +5,30 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-03-06
+
+### Added
+
+- **Examples**
+  - `cli-basics` - Command-line usage patterns for common tasks
+  - `claude-desktop` - Integration with Claude Desktop via MCP
+  - `go-client` - Using Cortex programmatically as a Go library
+  - `petalflow-research-agent` - Multi-agent research workflow using PetalFlow Agent/Task schema
+  - `petalflow-graph` - Building workflow graphs programmatically with PetalFlow
+  - `petalflow-agent-tools` - Using Cortex as a tool provider for PetalFlow agents
+
+- **Community**
+  - GitHub issue templates (bug report, feature request)
+  - Pull request template
+  - CONTRIBUTING guide
+  - SECURITY policy
+  - CODE_OF_CONDUCT
+
+### Fixed
+
+- Windows CI builds now properly configure SQLite headers
+- Line ending handling across platforms with git autocrlf
+
 ## [0.1.0] - 2026-03-05
 
 Initial release of Cortex - a memory and knowledge service for AI agents.
@@ -54,4 +78,5 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
+[0.1.1]: https://github.com/petal-labs/cortex/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/petal-labs/cortex/releases/tag/v0.1.0

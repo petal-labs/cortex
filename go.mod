@@ -12,15 +12,13 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/mattn/go-sqlite3 v1.14.34
-	github.com/petal-labs/iris v0.0.0
+	github.com/petal-labs/iris v0.0.0-20260215074851-88b18e925989
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	go.uber.org/zap v1.27.1
 )
-
-replace github.com/petal-labs/iris => ../iris
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

@@ -13,7 +13,7 @@ import (
 	"github.com/petal-labs/iris/providers/voyageai"
 )
 
-// Re-export core.EmbeddingProvider for use by callers.
+// EmbeddingProvider is an alias for core.EmbeddingProvider.
 type EmbeddingProvider = core.EmbeddingProvider
 
 // ProviderType identifies the LLM provider.

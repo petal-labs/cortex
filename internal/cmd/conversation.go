@@ -152,9 +152,9 @@ func initConversationEngine(cmd *cobra.Command, withSummarizer bool) (*conversat
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
-	// Create embedding provider if Iris is configured
+	// Create embedding provider if configured
 	var emb embedding.Provider
-	if cfg.Iris.Endpoint != "" {
+	if cfg.Embedding.Provider != "" {
 		emb, err = embedding.NewIrisClient(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create embedding client: %w", err)
@@ -173,9 +173,12 @@ func initConversationEngine(cmd *cobra.Command, withSummarizer bool) (*conversat
 		return nil, fmt.Errorf("failed to create conversation engine: %w", err)
 	}
 
-	// Set up summarization if requested and Iris is configured
-	if withSummarizer && cfg.Iris.Endpoint != "" && cfg.Summarization.Model != "" {
-		summClient := summarization.NewClient(cfg)
+	// Set up summarization if requested and provider is configured
+	if withSummarizer && cfg.Summarization.Provider != "" && cfg.Summarization.Model != "" {
+		summClient, err := summarization.NewClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create summarization client: %w", err)
+		}
 		engine.SetSummarizer(summClient)
 	}
 

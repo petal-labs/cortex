@@ -11,7 +11,6 @@ import (
 // Config holds all configuration for Cortex.
 type Config struct {
 	Storage       StorageConfig       `mapstructure:"storage"`
-	Iris          IrisConfig          `mapstructure:"iris"`
 	Embedding     EmbeddingConfig     `mapstructure:"embedding"`
 	Summarization SummarizationConfig `mapstructure:"summarization"`
 	Conversation  ConversationConfig  `mapstructure:"conversation"`
@@ -28,11 +27,6 @@ type StorageConfig struct {
 	Backend     string `mapstructure:"backend"`      // "sqlite" or "pgvector"
 	DataDir     string `mapstructure:"data_dir"`     // For SQLite
 	DatabaseURL string `mapstructure:"database_url"` // For pgvector
-}
-
-// IrisConfig configures the connection to Iris.
-type IrisConfig struct {
-	Endpoint string `mapstructure:"endpoint"`
 }
 
 // EmbeddingConfig configures embedding generation.
@@ -118,9 +112,6 @@ func DefaultConfig() *Config {
 		Storage: StorageConfig{
 			Backend: "sqlite",
 			DataDir: filepath.Join(homeDir, ".cortex", "data"),
-		},
-		Iris: IrisConfig{
-			Endpoint: "http://localhost:8787",
 		},
 		Embedding: EmbeddingConfig{
 			Provider:   "openai",
@@ -232,7 +223,6 @@ func Load(configPath string) (*Config, error) {
 func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("storage.backend", cfg.Storage.Backend)
 	v.SetDefault("storage.data_dir", cfg.Storage.DataDir)
-	v.SetDefault("iris.endpoint", cfg.Iris.Endpoint)
 	v.SetDefault("embedding.provider", cfg.Embedding.Provider)
 	v.SetDefault("embedding.model", cfg.Embedding.Model)
 	v.SetDefault("embedding.dimensions", cfg.Embedding.Dimensions)

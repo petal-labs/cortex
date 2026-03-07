@@ -1,17 +1,15 @@
 package entity
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/petal-labs/cortex/internal/config"
+	"github.com/petal-labs/cortex/internal/llm"
 	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/iris/core"
 )
 
 // ExtractionPrompt is the system prompt for entity extraction.
@@ -62,54 +60,31 @@ type ExtractionResult struct {
 	SourceText    string                  `json:"-"` // Original text (not serialized)
 }
 
-// Extractor extracts entities from text using an LLM.
+// Extractor extracts entities from text using an LLM via the iris SDK.
 type Extractor struct {
-	endpoint   string
-	provider   string
-	model      string
-	maxTokens  int
-	httpClient *http.Client
+	client    *core.Client
+	model     core.ModelID
+	maxTokens int
 }
 
-// Message represents a chat message for the LLM.
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// CompletionRequest is the request body for Iris completions endpoint.
-type CompletionRequest struct {
-	Provider  string    `json:"provider"`
-	Model     string    `json:"model"`
-	Messages  []Message `json:"messages"`
-	MaxTokens int       `json:"max_tokens,omitempty"`
-}
-
-// CompletionResponse is the response from Iris completions endpoint.
-type CompletionResponse struct {
-	Content string `json:"content"`
-	Model   string `json:"model,omitempty"`
-	Usage   *Usage `json:"usage,omitempty"`
-}
-
-// Usage contains token usage information.
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-// NewExtractor creates a new entity extractor.
-func NewExtractor(cfg *config.Config) *Extractor {
-	return &Extractor{
-		endpoint:  cfg.Iris.Endpoint,
-		provider:  cfg.Summarization.Provider, // Use same provider as summarization
-		model:     cfg.Entity.ExtractionModel,
-		maxTokens: 2048, // Sufficient for entity extraction responses
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+// NewExtractor creates a new entity extractor using the iris SDK.
+func NewExtractor(cfg *config.Config) (*Extractor, error) {
+	if cfg.Summarization.Provider == "" {
+		return nil, fmt.Errorf("summarization provider is required for entity extraction")
 	}
+
+	provider, err := llm.NewProvider(cfg.Summarization.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create entity extraction provider: %w", err)
+	}
+
+	client := llm.NewClient(provider)
+
+	return &Extractor{
+		client:    client,
+		model:     core.ModelID(cfg.Entity.ExtractionModel),
+		maxTokens: 2048, // Sufficient for entity extraction responses
+	}, nil
 }
 
 // Extract extracts entities from the given text.
@@ -118,11 +93,7 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 		return &ExtractionResult{Entities: []ExtractedEntity{}}, nil
 	}
 
-	messages := []Message{
-		{Role: "user", Content: ExtractionPrompt + "\n\n" + text},
-	}
-
-	content, err := e.complete(ctx, messages)
+	content, err := e.complete(ctx, ExtractionPrompt+"\n\n"+text)
 	if err != nil {
 		return nil, fmt.Errorf("extraction completion failed: %w", err)
 	}
@@ -153,47 +124,21 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 	}, nil
 }
 
-// complete sends a completion request to Iris.
-func (e *Extractor) complete(ctx context.Context, messages []Message) (string, error) {
-	req := CompletionRequest{
-		Provider:  e.provider,
-		Model:     e.model,
-		Messages:  messages,
-		MaxTokens: e.maxTokens,
+// complete sends a completion request using the iris SDK.
+func (e *Extractor) complete(ctx context.Context, userMessage string) (string, error) {
+	builder := e.client.Chat(e.model).
+		User(userMessage)
+
+	if e.maxTokens > 0 {
+		builder = builder.MaxTokens(e.maxTokens)
 	}
 
-	body, err := json.Marshal(req)
+	resp, err := builder.GetResponse(ctx)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", fmt.Errorf("completion request failed: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/v1/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("completion request failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var completionResp CompletionResponse
-	if err := json.Unmarshal(respBody, &completionResp); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	return completionResp.Content, nil
+	return resp.Output, nil
 }
 
 // parseExtractionResponse parses the LLM response into extracted entities.

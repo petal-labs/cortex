@@ -3,9 +3,7 @@ package entity
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -15,6 +13,26 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// MockExtractor provides a test implementation of entity extraction.
+type MockExtractor struct {
+	extractFunc func(ctx context.Context, text string) (*ExtractionResult, error)
+}
+
+func NewMockExtractor(entities []ExtractedEntity) *MockExtractor {
+	return &MockExtractor{
+		extractFunc: func(ctx context.Context, text string) (*ExtractionResult, error) {
+			return &ExtractionResult{
+				Entities:   entities,
+				SourceText: text,
+			}, nil
+		},
+	}
+}
+
+func (m *MockExtractor) Extract(ctx context.Context, text string) (*ExtractionResult, error) {
+	return m.extractFunc(ctx, text)
+}
 
 func setupTestQueueProcessor(t *testing.T) (*QueueProcessor, *Engine, *sqlite.Backend) {
 	t.Helper()
@@ -37,19 +55,40 @@ func setupTestQueueProcessor(t *testing.T) (*QueueProcessor, *Engine, *sqlite.Ba
 
 	resolver := NewResolver(backend, 0.8)
 
-	// Create mock extractor with test server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := CompletionResponse{
-			Content: `[]`,
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	t.Cleanup(server.Close)
+	// Create mock extractor that returns empty results
+	mockExtractor := NewMockExtractor([]ExtractedEntity{})
 
-	cfg.Iris.Endpoint = server.URL
-	extractor := NewExtractor(cfg)
+	processor := NewQueueProcessor(backend, mockExtractor, resolver, engine, &cfg.Entity)
 
-	processor := NewQueueProcessor(backend, extractor, resolver, engine, &cfg.Entity)
+	return processor, engine, backend
+}
+
+func setupTestQueueProcessorWithEntities(t *testing.T, entities []ExtractedEntity) (*QueueProcessor, *Engine, *sqlite.Backend) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+
+	backend := sqlite.NewWithDB(db)
+	if err := backend.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Entity.ExtractionMode = "full"
+	cfg.Entity.MinConfidence = 0.5
+
+	engine, err := NewEngine(backend, nil, &cfg.Entity)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	resolver := NewResolver(backend, 0.8)
+	mockExtractor := NewMockExtractor(entities)
+
+	processor := NewQueueProcessor(backend, mockExtractor, resolver, engine, &cfg.Entity)
 
 	return processor, engine, backend
 }
@@ -189,39 +228,12 @@ func TestQueueProcessorCalculateBackoff(t *testing.T) {
 }
 
 func TestQueueProcessorProcessSingle(t *testing.T) {
-	// Create a mock server that returns an entity
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := CompletionResponse{
-			Content: `[{"name": "Acme Corp", "type": "organization", "confidence": 0.9}]`,
-		}
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
-
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open database: %v", err)
-	}
-	defer db.Close()
-
-	backend := sqlite.NewWithDB(db)
-	if err := backend.Migrate(context.Background()); err != nil {
-		t.Fatalf("failed to migrate: %v", err)
+	entities := []ExtractedEntity{
+		{Name: "Acme Corp", Type: "organization", Confidence: 0.9},
 	}
 
-	cfg := config.DefaultConfig()
-	cfg.Iris.Endpoint = server.URL
-	cfg.Entity.ExtractionMode = "full"
-	cfg.Entity.MinConfidence = 0.5
-
-	engine, err := NewEngine(backend, nil, &cfg.Entity)
-	if err != nil {
-		t.Fatalf("failed to create engine: %v", err)
-	}
-
-	resolver := NewResolver(backend, 0.8)
-	extractor := NewExtractor(cfg)
-	processor := NewQueueProcessor(backend, extractor, resolver, engine, &cfg.Entity)
+	processor, _, backend := setupTestQueueProcessorWithEntities(t, entities)
+	defer backend.Close()
 
 	ctx := context.Background()
 
@@ -237,4 +249,13 @@ func TestQueueProcessorProcessSingle(t *testing.T) {
 	if result.Entities[0].Name != "Acme Corp" {
 		t.Errorf("expected entity name 'Acme Corp', got '%s'", result.Entities[0].Name)
 	}
+}
+
+// Integration test - requires real LLM provider
+func TestQueueProcessorProcessSingle_Integration(t *testing.T) {
+	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY or OPENAI_API_KEY not set, skipping integration test")
+	}
+
+	t.Skip("Integration test requires real LLM provider - run manually with API key")
 }

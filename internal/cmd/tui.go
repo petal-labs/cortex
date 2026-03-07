@@ -62,9 +62,9 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	// Create embedding provider if Iris is configured
+	// Create embedding provider if configured
 	var emb embedding.Provider
-	if cfg.Iris.Endpoint != "" {
+	if cfg.Embedding.Provider != "" {
 		emb, err = embedding.NewIrisClient(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to create embedding client: %w", err)

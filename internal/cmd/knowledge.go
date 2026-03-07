@@ -155,9 +155,9 @@ func initKnowledgeEngine(cmd *cobra.Command) (*knowledge.Engine, error) {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
-	// Create embedding provider if Iris is configured
+	// Create embedding provider if configured
 	var emb embedding.Provider
-	if cfg.Iris.Endpoint != "" {
+	if cfg.Embedding.Provider != "" {
 		emb, err = embedding.NewIrisClient(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create embedding client: %w", err)

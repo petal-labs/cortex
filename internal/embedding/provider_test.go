@@ -3,8 +3,7 @@ package embedding
 import (
 	"context"
 	"crypto/sha256"
-	"net/http"
-	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/petal-labs/cortex/internal/config"
@@ -246,113 +245,24 @@ func TestCachedProviderImmutability(t *testing.T) {
 	}
 }
 
-func TestIrisClientCreation(t *testing.T) {
+func TestIrisClientEmptyProvider(t *testing.T) {
 	cfg := config.DefaultConfig()
-
-	client, err := NewIrisClient(cfg)
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-	defer client.Close()
-
-	if client.Dimensions() != 1536 {
-		t.Errorf("expected 1536 dimensions, got %d", client.Dimensions())
-	}
-}
-
-func TestIrisClientEmptyEndpoint(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Iris.Endpoint = ""
+	cfg.Embedding.Provider = ""
 
 	_, err := NewIrisClient(cfg)
 	if err == nil {
-		t.Error("expected error for empty endpoint")
-	}
-}
-
-func TestIrisClientMockServer(t *testing.T) {
-	// Create a mock Iris server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/embeddings" {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-
-		// Return mock embeddings
-		response := `{
-			"embeddings": [[0.1, 0.2, 0.3, 0.4]],
-			"model": "test-model",
-			"usage": {"prompt_tokens": 10, "total_tokens": 10}
-		}`
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(response))
-	}))
-	defer server.Close()
-
-	cfg := config.DefaultConfig()
-	cfg.Iris.Endpoint = server.URL
-	cfg.Embedding.Dimensions = 4
-
-	client, err := NewIrisClient(cfg)
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-	defer client.Close()
-
-	embedding, err := client.Embed(context.Background(), "test text")
-	if err != nil {
-		t.Fatalf("failed to embed: %v", err)
-	}
-
-	expected := []float32{0.1, 0.2, 0.3, 0.4}
-	if len(embedding) != len(expected) {
-		t.Fatalf("expected %d dimensions, got %d", len(expected), len(embedding))
-	}
-
-	for i, v := range expected {
-		if embedding[i] != v {
-			t.Errorf("embedding[%d] = %f, expected %f", i, embedding[i], v)
-		}
-	}
-}
-
-func TestIrisClientBatchMockServer(t *testing.T) {
-	// Create a mock Iris server for batch requests
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return embeddings for each input
-		response := `{
-			"embeddings": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
-			"model": "test-model",
-			"usage": {"prompt_tokens": 30, "total_tokens": 30}
-		}`
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(response))
-	}))
-	defer server.Close()
-
-	cfg := config.DefaultConfig()
-	cfg.Iris.Endpoint = server.URL
-	cfg.Embedding.Dimensions = 2
-	cfg.Embedding.BatchSize = 10
-
-	client, err := NewIrisClient(cfg)
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
-	texts := []string{"a", "b", "c"}
-	embeddings, err := client.EmbedBatch(context.Background(), texts)
-	if err != nil {
-		t.Fatalf("failed to embed batch: %v", err)
-	}
-
-	if len(embeddings) != 3 {
-		t.Fatalf("expected 3 embeddings, got %d", len(embeddings))
+		t.Error("expected error for empty provider")
 	}
 }
 
 func TestIrisClientBatchTooLarge(t *testing.T) {
+	// Skip if no API key - this is an integration test
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+
 	cfg := config.DefaultConfig()
+	cfg.Embedding.Provider = "openai"
 	cfg.Embedding.BatchSize = 2
 
 	client, err := NewIrisClient(cfg)
@@ -368,7 +278,13 @@ func TestIrisClientBatchTooLarge(t *testing.T) {
 }
 
 func TestIrisClientEmptyInput(t *testing.T) {
+	// Skip if no API key - this is an integration test
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+
 	cfg := config.DefaultConfig()
+	cfg.Embedding.Provider = "openai"
 
 	client, err := NewIrisClient(cfg)
 	if err != nil {

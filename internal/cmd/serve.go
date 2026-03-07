@@ -94,9 +94,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		metricsServer.Start()
 	}
 
-	// Create embedding provider if Iris is configured
+	// Create embedding provider if configured
 	var emb embedding.Provider
-	if cfg.Iris.Endpoint != "" {
+	if cfg.Embedding.Provider != "" {
 		emb, err = embedding.NewIrisClient(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to create embedding client: %w", err)
@@ -117,9 +117,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create conversation engine: %w", err)
 	}
 
-	// Set up summarization if Iris is configured
-	if cfg.Iris.Endpoint != "" && cfg.Summarization.Model != "" {
-		summClient := summarization.NewClient(cfg)
+	// Set up summarization if provider is configured
+	if cfg.Summarization.Provider != "" && cfg.Summarization.Model != "" {
+		summClient, err := summarization.NewClient(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create summarization client: %w", err)
+		}
 		convEngine.SetSummarizer(summClient)
 	}
 
@@ -138,11 +141,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create entity engine: %w", err)
 	}
 
-	// Set up entity extraction pipeline if Iris is configured and extraction is enabled
+	// Set up entity extraction pipeline if provider is configured and extraction is enabled
 	var queueProcessor *entity.QueueProcessor
-	if cfg.Iris.Endpoint != "" && cfg.Entity.ExtractionMode != "off" {
-		// Create extractor (uses Iris completion API)
-		extractor := entity.NewExtractor(cfg)
+	if cfg.Summarization.Provider != "" && cfg.Entity.ExtractionMode != "off" {
+		// Create extractor (uses iris SDK)
+		extractor, err := entity.NewExtractor(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create entity extractor: %w", err)
+		}
 
 		// Create name resolver with configurable fuzzy threshold
 		resolver := entity.NewResolver(store, cfg.Entity.AliasFuzzyThreshold)

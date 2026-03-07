@@ -1,17 +1,14 @@
 package summarization
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/petal-labs/cortex/internal/config"
+	"github.com/petal-labs/cortex/internal/llm"
 	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/iris/core"
 )
 
 // SystemPrompt is the default prompt for conversation summarization.
@@ -24,97 +21,49 @@ const SystemPrompt = `You are a conversation summarizer. Create a concise summar
 
 Omit pleasantries, filler, and redundant exchanges. Write in present tense as a reference document, not a narrative.`
 
-// Client provides LLM completion capabilities via Iris.
+// Client provides LLM completion capabilities via the iris SDK.
 type Client struct {
-	endpoint   string
-	provider   string
-	model      string
-	maxTokens  int
-	httpClient *http.Client
+	client    *core.Client
+	model     core.ModelID
+	maxTokens int
 }
 
-// Message represents a chat message for the LLM.
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
+// NewClient creates a new summarization client using the iris SDK.
+func NewClient(cfg *config.Config) (*Client, error) {
+	if cfg.Summarization.Provider == "" {
+		return nil, fmt.Errorf("summarization provider is required")
+	}
 
-// CompletionRequest is the request body for Iris completions endpoint.
-type CompletionRequest struct {
-	Provider  string    `json:"provider"`
-	Model     string    `json:"model"`
-	Messages  []Message `json:"messages"`
-	MaxTokens int       `json:"max_tokens,omitempty"`
-}
+	provider, err := llm.NewProvider(cfg.Summarization.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create summarization provider: %w", err)
+	}
 
-// CompletionResponse is the response from Iris completions endpoint.
-type CompletionResponse struct {
-	Content string `json:"content"`
-	Model   string `json:"model,omitempty"`
-	Usage   *Usage `json:"usage,omitempty"`
-}
+	client := llm.NewClient(provider)
 
-// Usage contains token usage information.
-type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-// NewClient creates a new summarization client.
-func NewClient(cfg *config.Config) *Client {
 	return &Client{
-		endpoint:  cfg.Iris.Endpoint,
-		provider:  cfg.Summarization.Provider,
-		model:     cfg.Summarization.Model,
+		client:    client,
+		model:     core.ModelID(cfg.Summarization.Model),
 		maxTokens: cfg.Summarization.MaxTokens,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
-	}
+	}, nil
 }
 
-// Complete sends a completion request to Iris and returns the response.
-func (c *Client) Complete(ctx context.Context, messages []Message) (string, error) {
-	req := CompletionRequest{
-		Provider:  c.provider,
-		Model:     c.model,
-		Messages:  messages,
-		MaxTokens: c.maxTokens,
+// Complete sends a completion request using the iris SDK and returns the response.
+func (c *Client) Complete(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+	builder := c.client.Chat(c.model).
+		System(systemPrompt).
+		User(userMessage)
+
+	if c.maxTokens > 0 {
+		builder = builder.MaxTokens(c.maxTokens)
 	}
 
-	body, err := json.Marshal(req)
+	resp, err := builder.GetResponse(ctx)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", fmt.Errorf("completion request failed: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/v1/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("completion request failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var completionResp CompletionResponse
-	if err := json.Unmarshal(respBody, &completionResp); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	return completionResp.Content, nil
+	return resp.Output, nil
 }
 
 // SummarizeMessages summarizes a list of conversation messages.
@@ -124,13 +73,9 @@ func (c *Client) SummarizeMessages(ctx context.Context, messages []*types.Messag
 	}
 
 	formatted := formatMessages(messages)
+	userMessage := fmt.Sprintf("Summarize this conversation:\n\n%s", formatted)
 
-	llmMessages := []Message{
-		{Role: "system", Content: SystemPrompt},
-		{Role: "user", Content: fmt.Sprintf("Summarize this conversation:\n\n%s", formatted)},
-	}
-
-	return c.Complete(ctx, llmMessages)
+	return c.Complete(ctx, SystemPrompt, userMessage)
 }
 
 // formatMessages formats messages into a readable conversation transcript.

@@ -1,23 +1,18 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
 
 	"github.com/petal-labs/cortex/internal/config"
+	"github.com/petal-labs/cortex/internal/llm"
+	"github.com/petal-labs/iris/core"
 )
 
-// IrisClient implements the Provider interface using the Iris embedding service.
+// IrisClient implements the Provider interface using the iris SDK.
 type IrisClient struct {
-	httpClient *http.Client
-	endpoint   string
-	provider   string
-	model      string
+	provider   core.EmbeddingProvider
+	model      core.ModelID
 	dimensions int
 	batchSize  int
 }
@@ -25,19 +20,20 @@ type IrisClient struct {
 // Verify IrisClient implements Provider at compile time.
 var _ Provider = (*IrisClient)(nil)
 
-// NewIrisClient creates a new Iris embedding client.
+// NewIrisClient creates a new Iris embedding client using the iris SDK.
 func NewIrisClient(cfg *config.Config) (*IrisClient, error) {
-	if cfg.Iris.Endpoint == "" {
-		return nil, fmt.Errorf("iris endpoint is required")
+	if cfg.Embedding.Provider == "" {
+		return nil, fmt.Errorf("embedding provider is required")
+	}
+
+	provider, err := llm.NewEmbeddingProvider(cfg.Embedding.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedding provider: %w", err)
 	}
 
 	return &IrisClient{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		endpoint:   cfg.Iris.Endpoint,
-		provider:   cfg.Embedding.Provider,
-		model:      cfg.Embedding.Model,
+		provider:   provider,
+		model:      core.ModelID(cfg.Embedding.Model),
 		dimensions: cfg.Embedding.Dimensions,
 		batchSize:  cfg.Embedding.BatchSize,
 	}, nil
@@ -71,12 +67,12 @@ func (c *IrisClient) EmbedBatch(ctx context.Context, texts []string) ([][]float3
 		return nil, fmt.Errorf("%w: %d texts exceeds limit of %d", ErrBatchTooLarge, len(texts), c.batchSize)
 	}
 
-	// Filter out empty strings
-	nonEmpty := make([]string, 0, len(texts))
+	// Filter out empty strings and track indices
+	nonEmpty := make([]core.EmbeddingInput, 0, len(texts))
 	indices := make([]int, 0, len(texts))
 	for i, text := range texts {
 		if text != "" {
-			nonEmpty = append(nonEmpty, text)
+			nonEmpty = append(nonEmpty, core.EmbeddingInput{Text: text})
 			indices = append(indices, i)
 		}
 	}
@@ -91,55 +87,39 @@ func (c *IrisClient) EmbedBatch(ctx context.Context, texts []string) ([][]float3
 	}
 
 	// Create the embedding request
-	req := EmbeddingRequest{
-		Provider: c.provider,
-		Model:    c.model,
-		Input:    nonEmpty,
+	req := &core.EmbeddingRequest{
+		Model: c.model,
+		Input: nonEmpty,
 	}
 
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	// Set dimensions if specified
+	if c.dimensions > 0 {
+		req.Dimensions = &c.dimensions
 	}
 
-	// Send request to Iris
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/embeddings", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
+	// Call the iris SDK
+	resp, err := c.provider.CreateEmbeddings(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderFailed, err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d: %s", ErrProviderFailed, resp.StatusCode, string(body))
-	}
-
-	var embeddingResp EmbeddingResponse
-	if err := json.Unmarshal(body, &embeddingResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(embeddingResp.Embeddings) != len(nonEmpty) {
-		return nil, fmt.Errorf("%w: expected %d embeddings, got %d", ErrProviderFailed, len(nonEmpty), len(embeddingResp.Embeddings))
+	if len(resp.Vectors) != len(nonEmpty) {
+		return nil, fmt.Errorf("%w: expected %d embeddings, got %d", ErrProviderFailed, len(nonEmpty), len(resp.Vectors))
 	}
 
 	// Map embeddings back to original indices, filling empty inputs with zero vectors
 	result := make([][]float32, len(texts))
+	dims := c.dimensions
+	if dims == 0 && len(resp.Vectors) > 0 && len(resp.Vectors[0].Vector) > 0 {
+		dims = len(resp.Vectors[0].Vector)
+	}
 	for i := range result {
-		result[i] = make([]float32, c.dimensions)
+		result[i] = make([]float32, dims)
 	}
 	for i, idx := range indices {
-		result[idx] = embeddingResp.Embeddings[i]
+		if i < len(resp.Vectors) {
+			result[idx] = resp.Vectors[i].Vector
+		}
 	}
 
 	return result, nil
@@ -150,7 +130,7 @@ func (c *IrisClient) Dimensions() int {
 	return c.dimensions
 }
 
-// Close releases resources. For HTTP client, this is a no-op.
+// Close releases resources. For iris SDK, this is a no-op.
 func (c *IrisClient) Close() error {
 	return nil
 }

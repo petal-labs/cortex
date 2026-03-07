@@ -14,10 +14,15 @@ import (
 	"github.com/petal-labs/cortex/pkg/types"
 )
 
+// EntityExtractor defines the interface for entity extraction.
+type EntityExtractor interface {
+	Extract(ctx context.Context, text string) (*ExtractionResult, error)
+}
+
 // QueueProcessor processes the entity extraction queue asynchronously.
 type QueueProcessor struct {
 	storage   storage.Backend
-	extractor *Extractor
+	extractor EntityExtractor
 	resolver  *Resolver
 	engine    *Engine
 	cfg       *config.EntityConfig
@@ -30,7 +35,7 @@ type QueueProcessor struct {
 // NewQueueProcessor creates a new extraction queue processor.
 func NewQueueProcessor(
 	store storage.Backend,
-	extractor *Extractor,
+	extractor EntityExtractor,
 	resolver *Resolver,
 	engine *Engine,
 	cfg *config.EntityConfig,

@@ -54,8 +54,8 @@ storage:
   database_url: postgres://user:pass@localhost:5432/cortex
 
 embedding:
-  provider: anthropic
-  model: voyage-2
+  provider: voyageai
+  model: voyage-3-large
   dimensions: 1024
 
 conversation:
@@ -80,8 +80,8 @@ entity:
 	if cfg.Storage.Backend != "pgvector" {
 		t.Errorf("expected storage.backend to be 'pgvector', got '%s'", cfg.Storage.Backend)
 	}
-	if cfg.Embedding.Provider != "anthropic" {
-		t.Errorf("expected embedding.provider to be 'anthropic', got '%s'", cfg.Embedding.Provider)
+	if cfg.Embedding.Provider != "voyageai" {
+		t.Errorf("expected embedding.provider to be 'voyageai', got '%s'", cfg.Embedding.Provider)
 	}
 	if cfg.Embedding.Dimensions != 1024 {
 		t.Errorf("expected embedding.dimensions to be 1024, got %d", cfg.Embedding.Dimensions)

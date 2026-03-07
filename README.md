@@ -145,13 +145,15 @@ storage:
   backend: sqlite  # or "pgvector"
   data_dir: ~/.cortex/data
 
-iris:
-  endpoint: http://localhost:8000  # Iris embedding service
-
 embedding:
+  provider: openai  # openai, voyageai, gemini, ollama
   model: text-embedding-3-small
   dimensions: 1536
   cache_size: 10000
+
+summarization:
+  provider: anthropic  # anthropic, openai, gemini, ollama
+  model: claude-sonnet-4-6
 
 conversation:
   auto_summarize_threshold: 50

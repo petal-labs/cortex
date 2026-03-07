@@ -122,7 +122,7 @@ func DefaultConfig() *Config {
 		},
 		Summarization: SummarizationConfig{
 			Provider:  "anthropic",
-			Model:     "claude-sonnet-4-20250514",
+			Model:     "claude-sonnet-4-6",
 			MaxTokens: 1024,
 		},
 		Conversation: ConversationConfig{
@@ -142,7 +142,7 @@ func DefaultConfig() *Config {
 		},
 		Entity: EntityConfig{
 			ExtractionMode:               "full",
-			ExtractionModel:              "claude-haiku-4-5-20251001",
+			ExtractionModel:              "claude-haiku-4-5",
 			ExtractionBatchSize:          10,
 			ExtractionInterval:           5 * time.Second,
 			SampleRate:                   1.0,

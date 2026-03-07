@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/petal-labs/iris/core"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/llm"
 	"github.com/petal-labs/cortex/pkg/types"
-	"github.com/petal-labs/iris/core"
 )
 
 // SystemPrompt is the default prompt for conversation summarization.

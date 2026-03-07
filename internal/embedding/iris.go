@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/petal-labs/iris/core"
+
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/llm"
-	"github.com/petal-labs/iris/core"
 )
 
 // IrisClient implements the Provider interface using the iris SDK.

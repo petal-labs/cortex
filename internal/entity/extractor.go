@@ -14,27 +14,60 @@ import (
 )
 
 // ExtractionPrompt is the system prompt for entity extraction.
-const ExtractionPrompt = `Extract all named entities from the following text. For each entity, provide:
-- name: The canonical name
-- type: One of "person", "organization", "product", "location", "concept"
+// With structured output, we don't need to specify the JSON format.
+const ExtractionPrompt = `Extract all named entities from the following text. For each entity, identify:
+- name: The canonical name of the entity
+- type: Classify as "person", "organization", "product", "location", or "concept"
 - aliases: Any alternative names or abbreviations used in the text
-- attributes: Key facts mentioned about the entity
-- confidence: How confident you are in this extraction (0.0-1.0)
+- attributes: Key facts mentioned about the entity as key-value pairs
+- confidence: Your confidence in this extraction (0.0-1.0)
 
-Return your response as a JSON array of entities. If no entities are found, return an empty array [].
-
-Example response:
-[
-  {
-    "name": "International Business Machines",
-    "type": "organization",
-    "aliases": ["IBM", "Big Blue"],
-    "attributes": {"industry": "technology", "founded": "1911"},
-    "confidence": 0.95
-  }
-]
+If no entities are found, return an empty array.
 
 Text:`
+
+// entityExtractionSchema defines the JSON schema for structured output.
+// This ensures the model returns valid, parseable JSON matching our ExtractedEntity type.
+var entityExtractionSchema = &core.JSONSchemaDefinition{
+	Name:        "entity_extraction",
+	Description: "Array of extracted entities from text",
+	Strict:      true,
+	Schema: json.RawMessage(`{
+		"type": "array",
+		"items": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string",
+					"description": "The canonical name of the entity"
+				},
+				"type": {
+					"type": "string",
+					"enum": ["person", "organization", "product", "location", "concept"],
+					"description": "The type of entity"
+				},
+				"aliases": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Alternative names or abbreviations"
+				},
+				"attributes": {
+					"type": "object",
+					"additionalProperties": {"type": "string"},
+					"description": "Key facts about the entity"
+				},
+				"confidence": {
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1,
+					"description": "Confidence score from 0.0 to 1.0"
+				}
+			},
+			"required": ["name", "type", "confidence"],
+			"additionalProperties": false
+		}
+	}`),
+}
 
 // ExtractedEntity represents an entity extracted from text by the LLM.
 type ExtractedEntity struct {
@@ -89,20 +122,34 @@ func NewExtractor(cfg *config.Config) (*Extractor, error) {
 }
 
 // Extract extracts entities from the given text.
+// Uses structured output (JSON Schema) when supported by the provider for reliable parsing.
 func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult, error) {
 	if strings.TrimSpace(text) == "" {
 		return &ExtractionResult{Entities: []ExtractedEntity{}}, nil
 	}
 
-	content, err := e.complete(ctx, ExtractionPrompt+"\n\n"+text)
+	// Build request with structured output for reliable JSON parsing
+	builder := e.client.Chat(e.model).
+		User(ExtractionPrompt + "\n\n" + text).
+		ResponseJSONSchema(entityExtractionSchema)
+
+	if e.maxTokens > 0 {
+		builder = builder.MaxTokens(e.maxTokens)
+	}
+
+	resp, err := builder.GetResponse(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("extraction completion failed: %w", err)
 	}
 
-	// Parse the JSON response
-	entities, err := parseExtractionResponse(content)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse extraction response: %w", err)
+	// Parse the structured JSON response directly
+	var entities []ExtractedEntity
+	if err := json.Unmarshal([]byte(resp.Output), &entities); err != nil {
+		// Fallback to legacy parsing for providers that don't fully support structured output
+		entities, err = parseExtractionResponse(resp.Output)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse extraction response: %w", err)
+		}
 	}
 
 	// Validate and normalize entities
@@ -125,24 +172,8 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 	}, nil
 }
 
-// complete sends a completion request using the iris SDK.
-func (e *Extractor) complete(ctx context.Context, userMessage string) (string, error) {
-	builder := e.client.Chat(e.model).
-		User(userMessage)
-
-	if e.maxTokens > 0 {
-		builder = builder.MaxTokens(e.maxTokens)
-	}
-
-	resp, err := builder.GetResponse(ctx)
-	if err != nil {
-		return "", fmt.Errorf("completion request failed: %w", err)
-	}
-
-	return resp.Output, nil
-}
-
 // parseExtractionResponse parses the LLM response into extracted entities.
+// This is kept as a fallback for providers that don't fully support structured output.
 func parseExtractionResponse(content string) ([]ExtractedEntity, error) {
 	// Try to extract JSON from the response
 	content = strings.TrimSpace(content)

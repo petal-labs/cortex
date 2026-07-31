@@ -5,6 +5,29 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Dependencies**
+  - Upgraded Iris SDK from v0.14.0 to v0.15.0
+
+### Added
+
+- **Embeddings**
+  - New `embedding.timeout` config option (default 120s) that bounds embedding
+    provider calls. Cortex calls the embedding provider directly rather than
+    through `core.Client`, so iris's own execution timeout does not apply; this
+    imposes an equivalent deadline. The timeout is only applied when the caller
+    supplied no deadline of its own, and `timeout <= 0` disables it (unbounded).
+
+### Fixed
+
+- **Embeddings**
+  - A hung embedding provider call now fails fast with a legible
+    `context.DeadlineExceeded` (detectable via `errors.Is`) instead of blocking
+    until the caller cancels and surfacing as an opaque `context.Canceled`.
+
 ## [0.2.1] - 2026-07-29
 
 ### Changed

@@ -634,3 +634,19 @@ None yet.
 - charmbracelet/bubbletea v1.3.10 - Elm architecture TUI framework
 - charmbracelet/lipgloss v1.1.0 - Declarative terminal styling
 - charmbracelet/bubbles v1.0.0 - Pre-built TUI components
+
+### 2026-07-31 - Embedding Execution Timeout (iris v0.15.0)
+- Upgraded iris SDK v0.14.0 -> v0.15.0
+- Context: iris v0.15.0 adds a client-scoped 120s execution timeout
+  (core.WithTimeout / core.ErrTimeout), but it only covers chat/streaming
+  calls routed through core.Client. Cortex embeds via the raw
+  core.EmbeddingProvider (provider.CreateEmbeddings), so that timeout does
+  not reach embedding calls.
+- Added `embedding.timeout` config (default 120s) and wired it into
+  IrisClient.EmbedBatch: imposes a deadline around CreateEmbeddings only when
+  the caller supplied none; timeout <= 0 disables it (unbounded).
+- Provider errors now wrap both ErrProviderFailed and the underlying error, so
+  a hung call is detectable via errors.Is(err, context.DeadlineExceeded)
+  instead of being masked by caller cancellation (context.Canceled).
+- Added unit tests: timeout fires, disabled, and caller-deadline preserved.
+- Verified: `go build ./...` + `go test ./...` all pass.

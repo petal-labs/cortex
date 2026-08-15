@@ -31,11 +31,12 @@ type StorageConfig struct {
 
 // EmbeddingConfig configures embedding generation.
 type EmbeddingConfig struct {
-	Provider   string `mapstructure:"provider"`
-	Model      string `mapstructure:"model"`
-	Dimensions int    `mapstructure:"dimensions"`
-	BatchSize  int    `mapstructure:"batch_size"`
-	CacheSize  int    `mapstructure:"cache_size"`
+	Provider   string        `mapstructure:"provider"`
+	Model      string        `mapstructure:"model"`
+	Dimensions int           `mapstructure:"dimensions"`
+	BatchSize  int           `mapstructure:"batch_size"`
+	CacheSize  int           `mapstructure:"cache_size"`
+	Timeout    time.Duration `mapstructure:"timeout"`
 }
 
 // SummarizationConfig configures LLM summarization.
@@ -119,6 +120,7 @@ func DefaultConfig() *Config {
 			Dimensions: 1536,
 			BatchSize:  100,
 			CacheSize:  1000,
+			Timeout:    120 * time.Second,
 		},
 		Summarization: SummarizationConfig{
 			Provider:  "anthropic",
@@ -228,6 +230,7 @@ func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("embedding.dimensions", cfg.Embedding.Dimensions)
 	v.SetDefault("embedding.batch_size", cfg.Embedding.BatchSize)
 	v.SetDefault("embedding.cache_size", cfg.Embedding.CacheSize)
+	v.SetDefault("embedding.timeout", cfg.Embedding.Timeout)
 	v.SetDefault("summarization.provider", cfg.Summarization.Provider)
 	v.SetDefault("summarization.model", cfg.Summarization.Model)
 	v.SetDefault("summarization.max_tokens", cfg.Summarization.MaxTokens)

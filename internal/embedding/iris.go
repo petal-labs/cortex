@@ -3,6 +3,7 @@ package embedding
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/petal-labs/iris/core"
 
@@ -16,6 +17,7 @@ type IrisClient struct {
 	model      core.ModelID
 	dimensions int
 	batchSize  int
+	timeout    time.Duration
 }
 
 // Verify IrisClient implements Provider at compile time.
@@ -37,6 +39,7 @@ func NewIrisClient(cfg *config.Config) (*IrisClient, error) {
 		model:      core.ModelID(cfg.Embedding.Model),
 		dimensions: cfg.Embedding.Dimensions,
 		batchSize:  cfg.Embedding.BatchSize,
+		timeout:    cfg.Embedding.Timeout,
 	}, nil
 }
 
@@ -98,10 +101,27 @@ func (c *IrisClient) EmbedBatch(ctx context.Context, texts []string) ([][]float3
 		req.Dimensions = &c.dimensions
 	}
 
+	// Cortex calls the embedding provider directly rather than through a
+	// core.Client, so iris's own execution timeout does not apply here. Impose
+	// our own deadline so a hung provider call fails fast with a legible
+	// context.DeadlineExceeded instead of blocking until the caller cancels.
+	// Only applied when the caller supplied no deadline of its own, so a tighter
+	// caller budget still wins; timeout <= 0 disables it (unbounded).
+	if c.timeout > 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.timeout)
+			defer cancel()
+		}
+	}
+
 	// Call the iris SDK
 	resp, err := c.provider.CreateEmbeddings(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderFailed, err)
+		// Wrap both sentinels so callers can distinguish a timeout
+		// (errors.Is(err, context.DeadlineExceeded)) from other provider
+		// failures while still matching ErrProviderFailed.
+		return nil, fmt.Errorf("%w: %w", ErrProviderFailed, err)
 	}
 
 	if len(resp.Vectors) != len(nonEmpty) {

@@ -1,0 +1,97 @@
+package pgvector
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
+
+func TestBuildMigrationStatements_InjectsDimensions(t *testing.T) {
+	cases := []int{768, 1536, 3072}
+
+	for _, dims := range cases {
+		t.Run("", func(t *testing.T) {
+			statements, err := buildMigrationStatements(dims)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if len(statements) == 0 {
+				t.Fatal("expected non-empty migration statements")
+			}
+
+			want := "vector(" + strconv.Itoa(dims) + ")"
+			count := 0
+			for _, stmt := range statements {
+				if strings.Contains(stmt, want) {
+					count++
+				}
+				if strings.Contains(stmt, "vector(1536)") && dims != 1536 {
+					t.Errorf("found stale hardcoded vector(1536) for dims=%d in statement:\n%s", dims, stmt)
+				}
+			}
+			if count != 3 {
+				t.Errorf("expected 3 embedding columns with %s, got %d", want, count)
+			}
+		})
+	}
+}
+
+func TestBuildMigrationStatements_IncludesAllEmbeddingTables(t *testing.T) {
+	statements, err := buildMigrationStatements(1536)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	tables := []string{
+		"message_embeddings",
+		"chunks",
+		"entity_embeddings",
+	}
+	joined := strings.Join(statements, "\n")
+	for _, table := range tables {
+		if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS "+table) {
+			t.Errorf("expected DDL to create table %q", table)
+		}
+	}
+}
+
+func TestBuildMigrationStatements_InvalidDimension(t *testing.T) {
+	cases := []int{0, -1, -1536}
+
+	for _, dims := range cases {
+		t.Run(strconv.Itoa(dims), func(t *testing.T) {
+			statements, err := buildMigrationStatements(dims)
+			if err == nil {
+				t.Fatalf("expected error for dimensions=%d, got nil", dims)
+			}
+			if statements != nil {
+				t.Errorf("expected nil statements on error, got %d statements", len(statements))
+			}
+			if !strings.Contains(err.Error(), "must be > 0") {
+				t.Errorf("expected error to mention must be > 0, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildMigrationStatements_PreservesHNSWIndexes(t *testing.T) {
+	statements, err := buildMigrationStatements(768)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	indexes := []string{
+		"idx_message_embeddings_hnsw",
+		"idx_chunks_embedding_hnsw",
+		"idx_entity_embeddings_hnsw",
+	}
+	joined := strings.Join(statements, "\n")
+	for _, idx := range indexes {
+		if !strings.Contains(joined, idx) {
+			t.Errorf("expected HNSW index %q in DDL", idx)
+		}
+	}
+	if !strings.Contains(joined, "vector_cosine_ops") {
+		t.Error("expected vector_cosine_ops in HNSW index definitions")
+	}
+}

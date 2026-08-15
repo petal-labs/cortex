@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/storage"
@@ -36,9 +37,17 @@ func New(cfg *config.Config) (*Backend, error) {
 	poolConfig.MaxConns = 25
 	poolConfig.MinConns = 5
 
-	// Register pgvector type
+	// Ensure the pgvector extension exists and register vector types on every
+	// pooled connection. RegisterTypes queries to_regtype('vector')::oid, which
+	// returns NULL if the extension is missing, so CREATE EXTENSION must run
+	// first. Extensions are per-database, so a single connection suffices.
 	poolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		// pgvector-go automatically registers types when using the pgx driver
+		if _, err := conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector"); err != nil {
+			return fmt.Errorf("failed to create vector extension: %w", err)
+		}
+		if err := pgxvec.RegisterTypes(ctx, conn); err != nil {
+			return fmt.Errorf("failed to register pgvector types: %w", err)
+		}
 		return nil
 	}
 

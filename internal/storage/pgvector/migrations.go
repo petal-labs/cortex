@@ -15,11 +15,6 @@ func (b *Backend) runMigrations(ctx context.Context) error {
 		return fmt.Errorf("invalid embedding dimensions: %w", err)
 	}
 
-	// Ensure pgvector extension is installed
-	if _, err := b.pool.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector"); err != nil {
-		return fmt.Errorf("failed to create vector extension: %w", err)
-	}
-
 	// Run all table creation statements
 	for _, stmt := range statements {
 		if _, err := b.pool.Exec(ctx, stmt); err != nil {

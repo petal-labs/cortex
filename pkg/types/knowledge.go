@@ -72,10 +72,13 @@ type ChunkResult struct {
 
 // CollectionStats holds statistics for a collection.
 type CollectionStats struct {
-	DocumentCount int64     `json:"document_count"`
-	ChunkCount    int64     `json:"chunk_count"`
-	TotalTokens   int64     `json:"total_tokens"`
-	LastIngest    time.Time `json:"last_ingest"`
+	DocumentCount int64 `json:"document_count"`
+	ChunkCount    int64 `json:"chunk_count"`
+	TotalTokens   int64 `json:"total_tokens"`
+	// LastIngest is nil (omitted from JSON) for collections that have
+	// never been ingested into — emitting a zero time.Time would render
+	// as the misleading "0001-01-01T00:00:00Z".
+	LastIngest *time.Time `json:"last_ingest,omitempty"`
 }
 
 // KnowledgeIngestResponse represents the response from knowledge.ingest.

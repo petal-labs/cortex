@@ -209,3 +209,21 @@ func TestSearchResultsStripEmbeddings(t *testing.T) {
 		}
 	}
 }
+
+// TestNoZeroTimestampsAcrossGoldenShapes verifies no DTO response carries a
+// zero time.Time, which serializes as the misleading
+// "0001-01-01T00:00:00Z". Timestamps on the wire must be either populated
+// or omitted — never the zero value.
+func TestNoZeroTimestampsAcrossGoldenShapes(t *testing.T) {
+	for name, v := range goldenCases() {
+		t.Run(name, func(t *testing.T) {
+			data, err := json.Marshal(v)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if strings.Contains(string(data), "0001-01-01") {
+				t.Errorf("zero-value timestamp leaked into %s response: %s", name, data)
+			}
+		})
+	}
+}

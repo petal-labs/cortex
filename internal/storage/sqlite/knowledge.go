@@ -422,7 +422,8 @@ func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID s
 		return nil, fmt.Errorf("failed to get last ingest: %w", err)
 	}
 	if lastIngestUnix.Valid {
-		stats.LastIngest = time.Unix(lastIngestUnix.Int64, 0).UTC()
+		t := time.Unix(lastIngestUnix.Int64, 0).UTC()
+		stats.LastIngest = &t
 	}
 
 	return stats, nil

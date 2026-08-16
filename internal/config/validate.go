@@ -29,6 +29,21 @@ func (c *Config) Validate() error {
 		problems = append(problems, fmt.Sprintf(
 			`storage.backend %q is not supported (supported: "sqlite", "pgvector")`, c.Storage.Backend))
 	}
+	if c.Storage.PoolMaxConns < 0 {
+		problems = append(problems, fmt.Sprintf(
+			"storage.pool_max_conns must be >= 0, 0 uses the database URL params or the default (got %d)",
+			c.Storage.PoolMaxConns))
+	}
+	if c.Storage.PoolMinConns < 0 {
+		problems = append(problems, fmt.Sprintf(
+			"storage.pool_min_conns must be >= 0, 0 uses the database URL params or the default (got %d)",
+			c.Storage.PoolMinConns))
+	}
+	if c.Storage.PoolMaxConns > 0 && c.Storage.PoolMinConns > 0 && c.Storage.PoolMinConns > c.Storage.PoolMaxConns {
+		problems = append(problems, fmt.Sprintf(
+			"storage.pool_min_conns (%d) must not exceed storage.pool_max_conns (%d)",
+			c.Storage.PoolMinConns, c.Storage.PoolMaxConns))
+	}
 
 	// Embedding
 	if c.Embedding.Dimensions <= 0 {

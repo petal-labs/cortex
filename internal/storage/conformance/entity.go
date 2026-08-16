@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
@@ -373,6 +374,43 @@ func testEntity(ctx context.Context, t *testing.T, b storage.Backend, dims int) 
 		// Complete one item.
 		if err := b.CompleteExtraction(ctx, items[0].ID, "completed"); err != nil {
 			t.Fatalf("CompleteExtraction: %v", err)
+		}
+
+		// Requeue one in-flight item with a future retry: it returns to
+		// pending but is not eligible until next_retry_at elapses.
+		future := time.Now().Add(1 * time.Hour)
+		if err := b.RequeueExtraction(ctx, items[1].ID, future, true); err != nil {
+			t.Fatalf("RequeueExtraction: %v", err)
+		}
+
+		requeued, err := b.DequeueExtraction(ctx, 10)
+		if err != nil {
+			t.Fatalf("DequeueExtraction after requeue: %v", err)
+		}
+		for _, it := range requeued {
+			if it.ID == items[1].ID {
+				t.Error("expected requeued item to be ineligible during backoff")
+			}
+		}
+
+		// Requeue without counting the failure (shutdown path): immediately
+		// eligible again.
+		if err := b.RequeueExtraction(ctx, items[1].ID, time.Time{}, false); err != nil {
+			t.Fatalf("RequeueExtraction (shutdown): %v", err)
+		}
+
+		requeued, err = b.DequeueExtraction(ctx, 10)
+		if err != nil {
+			t.Fatalf("DequeueExtraction after shutdown requeue: %v", err)
+		}
+		found := false
+		for _, it := range requeued {
+			if it.ID == items[1].ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected shutdown-requeued item to be immediately eligible")
 		}
 	})
 }

@@ -766,11 +766,13 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 	}
 	defer tx.Rollback(ctx)
 
-	// Get and lock pending items using FOR UPDATE SKIP LOCKED
+	// Get and lock pending items whose backoff (if any) has elapsed,
+	// using FOR UPDATE SKIP LOCKED
 	rows, err := tx.Query(ctx, `
-		SELECT id, namespace, source_type, source_id, content, status, retry_count, created_at, processed_at
+		SELECT id, namespace, source_type, source_id, content, status, retry_count, created_at, processed_at, next_retry_at
 		FROM extraction_queue
 		WHERE status = 'pending'
+			AND (next_retry_at IS NULL OR next_retry_at <= NOW())
 		ORDER BY created_at
 		LIMIT $1
 		FOR UPDATE SKIP LOCKED
@@ -788,7 +790,7 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 		if err := rows.Scan(
 			&item.ID, &item.Namespace, &item.SourceType, &item.SourceID,
 			&item.Content, &item.Status, &item.Attempts,
-			&item.CreatedAt, &processedAt,
+			&item.CreatedAt, &processedAt, &item.NextRetryAt,
 		); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("failed to scan queue item: %w", err)
@@ -828,6 +830,36 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 	}
 
 	return items, nil
+}
+
+// RequeueExtraction returns a dequeued ("processing") item to the pending
+// state, scheduling its next attempt no earlier than nextRetryAt (a zero
+// time means immediately eligible). When countFailure is false the attempt
+// increment applied at dequeue is undone.
+func (b *Backend) RequeueExtraction(ctx context.Context, itemID int64, nextRetryAt time.Time, countFailure bool) error {
+	attemptExpr := "retry_count = retry_count - 1"
+	if countFailure {
+		attemptExpr = "retry_count = retry_count"
+	}
+
+	var retryVal any
+	if !nextRetryAt.IsZero() {
+		retryVal = nextRetryAt.UTC()
+	}
+
+	result, err := b.pool.Exec(ctx, `
+		UPDATE extraction_queue
+		SET status = 'pending', next_retry_at = $1, `+attemptExpr+`
+		WHERE id = $2
+	`, retryVal, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to requeue extraction: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return storage.ErrNotFound
+	}
+	return nil
 }
 
 // CompleteExtraction marks an extraction queue item as completed or failed.

@@ -802,14 +802,15 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 	}
 
 	return b.withTxResult(ctx, func(tx *sql.Tx) ([]*types.ExtractionQueueItem, error) {
-		// Get pending items
+		// Get pending items whose backoff (if any) has elapsed
 		rows, err := tx.QueryContext(ctx, `
-			SELECT id, namespace, source_type, source_id, content, status, attempts, created_at, processed_at
+			SELECT id, namespace, source_type, source_id, content, status, attempts, created_at, processed_at, next_retry_at
 			FROM entity_extraction_queue
 			WHERE status = 'pending'
+				AND (next_retry_at IS NULL OR next_retry_at <= ?)
 			ORDER BY created_at
 			LIMIT ?
-		`, batchSize)
+		`, time.Now().UTC().Unix(), batchSize)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query queue: %w", err)
 		}
@@ -821,11 +822,12 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 			item := &types.ExtractionQueueItem{}
 			var createdAtUnix int64
 			var processedAtUnix sql.NullInt64
+			var nextRetryAtUnix sql.NullInt64
 
 			if err := rows.Scan(
 				&item.ID, &item.Namespace, &item.SourceType, &item.SourceID,
 				&item.Content, &item.Status, &item.Attempts,
-				&createdAtUnix, &processedAtUnix,
+				&createdAtUnix, &processedAtUnix, &nextRetryAtUnix,
 			); err != nil {
 				return nil, fmt.Errorf("failed to scan queue item: %w", err)
 			}
@@ -834,6 +836,10 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 			if processedAtUnix.Valid {
 				t := time.Unix(processedAtUnix.Int64, 0).UTC()
 				item.ProcessedAt = &t
+			}
+			if nextRetryAtUnix.Valid {
+				t := time.Unix(nextRetryAtUnix.Int64, 0).UTC()
+				item.NextRetryAt = &t
 			}
 
 			items = append(items, item)
@@ -862,6 +868,37 @@ func (b *Backend) DequeueExtraction(ctx context.Context, batchSize int) ([]*type
 
 		return items, nil
 	})
+}
+
+// RequeueExtraction returns a dequeued ("processing") item to the pending
+// state, scheduling its next attempt no earlier than nextRetryAt (a zero
+// time means immediately eligible). When countFailure is false the attempt
+// increment applied at dequeue is undone.
+func (b *Backend) RequeueExtraction(ctx context.Context, itemID int64, nextRetryAt time.Time, countFailure bool) error {
+	var retryVal any
+	if !nextRetryAt.IsZero() {
+		retryVal = nextRetryAt.UTC().Unix()
+	}
+
+	attemptExpr := "attempts - 1"
+	if countFailure {
+		attemptExpr = "attempts"
+	}
+
+	result, err := b.db.ExecContext(ctx, `
+		UPDATE entity_extraction_queue
+		SET status = 'pending', next_retry_at = ?, attempts = `+attemptExpr+`
+		WHERE id = ?
+	`, retryVal, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to requeue extraction: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err == nil && affected == 0 {
+		return storage.ErrNotFound
+	}
+	return nil
 }
 
 // withTxResult is a helper for transactions that return a result.

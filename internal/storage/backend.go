@@ -241,7 +241,15 @@ type EntityStorage interface {
 
 	// DequeueExtraction retrieves pending items from the extraction queue.
 	// Items are marked as "processing" to prevent duplicate processing.
+	// Items whose next_retry_at is in the future are not returned.
 	DequeueExtraction(ctx context.Context, batchSize int) ([]*types.ExtractionQueueItem, error)
+
+	// RequeueExtraction returns a dequeued ("processing") item to the pending
+	// state, scheduling its next attempt no earlier than nextRetryAt (a zero
+	// time means immediately eligible). When countFailure is false the
+	// attempt increment applied at dequeue is undone — used when processing
+	// was abandoned (e.g. shutdown) rather than failed.
+	RequeueExtraction(ctx context.Context, itemID int64, nextRetryAt time.Time, countFailure bool) error
 
 	// CompleteExtraction marks an extraction queue item as completed or failed.
 	CompleteExtraction(ctx context.Context, itemID int64, status string) error

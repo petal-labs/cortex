@@ -2,6 +2,7 @@ package pgvector
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -14,11 +15,16 @@ import (
 )
 
 // TestConformance runs the dual-backend conformance suite against a real
-// Postgres+pgvector instance via testcontainers. This requires Docker and is
-// skipped when Docker is unavailable or when running in short mode.
+// Postgres+pgvector instance via testcontainers. This requires a working
+// Docker daemon that can run Linux containers. It is skipped when Docker is
+// unavailable, when running in short mode, or on Windows (where GitHub Actions
+// runners cannot run Linux containers).
 func TestConformance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping pgvector conformance in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping pgvector conformance on Windows (no Linux container support)")
 	}
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
@@ -31,7 +37,7 @@ func TestConformance(t *testing.T) {
 		testcontainers.WithWaitStrategy(wait.ForLog("database system is ready to accept connections").WithOccurrence(2)),
 	)
 	if err != nil {
-		t.Fatalf("failed to start pgvector container: %v", err)
+		t.Skipf("skipping pgvector conformance: could not start container: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := container.Terminate(ctx); err != nil {

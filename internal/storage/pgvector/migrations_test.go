@@ -95,3 +95,57 @@ func TestBuildMigrationStatements_PreservesHNSWIndexes(t *testing.T) {
 		t.Error("expected vector_cosine_ops in HNSW index definitions")
 	}
 }
+
+func TestBuildMigrations_InitialSchema(t *testing.T) {
+	migrations, err := buildMigrations(1536)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(migrations) != 1 {
+		t.Fatalf("expected 1 migration, got %d", len(migrations))
+	}
+	m := migrations[0]
+	if m.Version != 1 {
+		t.Errorf("expected version 1, got %d", m.Version)
+	}
+	if m.Name != "initial_schema" {
+		t.Errorf("expected name initial_schema, got %q", m.Name)
+	}
+	if len(m.Up) == 0 {
+		t.Error("expected non-empty Up statements")
+	}
+
+	want, err := buildMigrationStatements(1536)
+	if err != nil {
+		t.Fatalf("expected no error from buildMigrationStatements, got %v", err)
+	}
+	if len(m.Up) != len(want) {
+		t.Errorf("expected %d statements, got %d", len(want), len(m.Up))
+	}
+	for i, stmt := range m.Up {
+		if stmt != want[i] {
+			t.Errorf("statement %d differs from buildMigrationStatements output", i)
+		}
+	}
+}
+
+func TestBuildMigrations_InvalidDimension(t *testing.T) {
+	if _, err := buildMigrations(0); err == nil {
+		t.Error("expected error for dimensions=0, got nil")
+	}
+	if _, err := buildMigrations(-1); err == nil {
+		t.Error("expected error for dimensions=-1, got nil")
+	}
+}
+
+func TestBuildMigrations_VersionOrdering(t *testing.T) {
+	migrations, err := buildMigrations(768)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	for i := 1; i < len(migrations); i++ {
+		if migrations[i].Version <= migrations[i-1].Version {
+			t.Errorf("migrations not ordered: %d after %d", migrations[i].Version, migrations[i-1].Version)
+		}
+	}
+}

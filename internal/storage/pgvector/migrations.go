@@ -2,37 +2,132 @@ package pgvector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
-// runMigrations creates all required tables and indexes.
+// Migration represents a versioned database migration. Each migration is
+// applied in a single transaction; Up is the ordered list of statements pgx
+// executes (pgx's extended-protocol Exec runs one statement per call, unlike
+// the SQLite driver which accepts multi-statement strings).
+type Migration struct {
+	Version int
+	Name    string
+	Up      []string
+}
+
+// buildMigrations returns the ordered versioned migrations, with the embedding
+// vector columns sized to the configured dimension.
+func buildMigrations(dimensions int) ([]Migration, error) {
+	statements, err := buildMigrationStatements(dimensions)
+	if err != nil {
+		return nil, err
+	}
+	return []Migration{
+		{
+			Version: 1,
+			Name:    "initial_schema",
+			Up:      statements,
+		},
+	}, nil
+}
+
+// runMigrations applies pending versioned migrations in order, recording each
+// applied version in cortex_metadata.schema_version. This mirrors the SQLite
+// versioned-migration runner (internal/storage/sqlite/migrations.go) so both
+// backends evolve the schema consistently post-1.0.
 func (b *Backend) runMigrations(ctx context.Context) error {
-	statements, err := buildMigrationStatements(b.cfg.Embedding.Dimensions)
+	migrations, err := buildMigrations(b.cfg.Embedding.Dimensions)
 	if err != nil {
 		return fmt.Errorf("invalid embedding dimensions: %w", err)
 	}
 
-	// Run all table creation statements
-	for _, stmt := range statements {
-		if _, err := b.pool.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
+	// Ensure the metadata table exists (same shape as SQLite for cross-backend
+	// consistency).
+	if _, err := b.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS cortex_metadata (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("failed to create metadata table: %w", err)
+	}
+
+	currentVersion, err := b.getSchemaVersion(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Apply pending migrations in order, each in its own transaction.
+	for _, m := range migrations {
+		if m.Version <= currentVersion {
+			continue
+		}
+		if err := b.applyMigration(ctx, m); err != nil {
+			return err
 		}
 	}
 
 	// CREATE TABLE IF NOT EXISTS is a no-op when a table already exists, so
 	// changing embedding.dimensions on an existing database will not alter the
 	// column type. Fail fast with an actionable error rather than silently
-	// breaking at insert time. The actual ALTER to re-cast columns belongs to
-	// the versioned migration runner (issue #5), since vector dimension changes
-	// are lossy and must be a deliberate user action.
+	// breaking at insert time. A future versioned migration can ALTER the
+	// column type; vector dimension changes are lossy and must be deliberate.
 	if err := b.verifyEmbeddingDimensions(ctx, b.cfg.Embedding.Dimensions); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// applyMigration executes a single migration in a transaction and records its
+// version in cortex_metadata.
+func (b *Backend) applyMigration(ctx context.Context, m Migration) error {
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin migration transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // Safe no-op after Commit.
+
+	for _, stmt := range m.Up {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to run migration %d (%s): %w", m.Version, m.Name, err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO cortex_metadata (key, value) VALUES ('schema_version', $1)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		strconv.Itoa(m.Version),
+	); err != nil {
+		return fmt.Errorf("failed to update schema version: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit migration %d (%s): %w", m.Version, m.Name, err)
+	}
+	return nil
+}
+
+// getSchemaVersion returns the current schema version from cortex_metadata, or
+// 0 if no version has been recorded yet (fresh database).
+func (b *Backend) getSchemaVersion(ctx context.Context) (int, error) {
+	var value string
+	err := b.pool.QueryRow(ctx, "SELECT value FROM cortex_metadata WHERE key = 'schema_version'").Scan(&value)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to get schema version: %w", err)
+	}
+	v, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid schema_version %q: %w", value, err)
+	}
+	return v, nil
 }
 
 // vectorDimensionRE matches the dimension declared in a vector column type as

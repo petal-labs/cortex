@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -1102,5 +1103,101 @@ func TestBulkIngestWithConcurrency(t *testing.T) {
 	}
 	if result.Succeeded != 10 {
 		t.Errorf("expected 10 succeeded, got %d", result.Succeeded)
+	}
+}
+
+// FailingMockEmbeddingProvider is a mock that always returns an error on
+// EmbedBatch, simulating a transient embedding-provider failure.
+type FailingMockEmbeddingProvider struct {
+	dimensions int
+}
+
+func (m *FailingMockEmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	return nil, errors.New("embedding provider unavailable")
+}
+
+func (m *FailingMockEmbeddingProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, errors.New("embedding provider unavailable")
+}
+
+func (m *FailingMockEmbeddingProvider) Dimensions() int {
+	return m.dimensions
+}
+
+func (m *FailingMockEmbeddingProvider) Close() error {
+	return nil
+}
+
+func TestIngestEmbeddingFailure(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:?_foreign_keys=ON")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	backend := sqlite.NewWithDB(db)
+	if err := backend.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	engine, err := NewEngine(backend, &FailingMockEmbeddingProvider{dimensions: 128}, &cfg.Knowledge)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	content := "This is a test document with some content. It has multiple sentences."
+
+	_, err = engine.Ingest(ctx, namespace, col.ID, content, &IngestOpts{
+		Title: "Test Document",
+	})
+	if err == nil {
+		t.Fatal("expected error when embedding fails, got nil")
+	}
+	if !errors.Is(err, ErrEmbeddingFailed) {
+		t.Errorf("expected ErrEmbeddingFailed, got %v", err)
+	}
+}
+
+func TestIngestNoEmbeddingProvider(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:?_foreign_keys=ON")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	backend := sqlite.NewWithDB(db)
+	if err := backend.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	engine, err := NewEngine(backend, nil, &cfg.Knowledge)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+
+	ctx := context.Background()
+	namespace := "test-ns"
+	col := createTestCollection(t, engine, namespace)
+
+	content := "This is a test document with some content. It has multiple sentences."
+
+	result, err := engine.Ingest(ctx, namespace, col.ID, content, &IngestOpts{
+		Title: "Test Document",
+	})
+	if err != nil {
+		t.Fatalf("expected success with no embedding provider, got: %v", err)
+	}
+	if result.ChunksCreated == 0 {
+		t.Error("expected at least one chunk")
 	}
 }

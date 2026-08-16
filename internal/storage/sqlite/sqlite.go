@@ -85,6 +85,17 @@ func New(cfg *config.Config) (*Backend, error) {
 		dbPath: dbPath,
 	}
 
+	// Run migrations so the backend is ready when New returns, mirroring
+	// the pgvector backend's New. Without this, every caller that doesn't
+	// explicitly Migrate (serve, the knowledge/conversation/context/entity
+	// CLI commands, examples) fails on a fresh database with
+	// "no such table". Idempotent: the versioned runner skips applied
+	// migrations.
+	if err := backend.Migrate(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	return backend, nil
 }
 

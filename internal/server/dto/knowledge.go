@@ -48,14 +48,18 @@ func newCollection(c *types.Collection) *Collection {
 	}
 }
 
-// Chunk mirrors types.Chunk.
+// Chunk is the read shape of types.Chunk. It deliberately omits the
+// Embedding field: chunks in search results carry ~dimension-count floats
+// each (1536 by default), so serializing them into a top_k:20 response
+// emits tens of thousands of float noise, bloating token usage for LLM
+// clients. Clients never need the stored vectors — only the server does
+// for similarity computation.
 type Chunk struct {
 	ID           string            `json:"id"`
 	DocumentID   string            `json:"document_id"`
 	Namespace    string            `json:"namespace"`
 	CollectionID string            `json:"collection_id"`
 	Content      string            `json:"content"`
-	Embedding    []float32         `json:"embedding,omitempty"`
 	Index        int               `json:"index"`
 	TokenCount   int               `json:"token_count,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
@@ -71,7 +75,6 @@ func newChunk(c *types.Chunk) *Chunk {
 		Namespace:    c.Namespace,
 		CollectionID: c.CollectionID,
 		Content:      c.Content,
-		Embedding:    c.Embedding,
 		Index:        c.Index,
 		TokenCount:   c.TokenCount,
 		Metadata:     c.Metadata,

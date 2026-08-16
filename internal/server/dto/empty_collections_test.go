@@ -8,6 +8,7 @@ import (
 
 	ctxengine "github.com/petal-labs/cortex/internal/context"
 	"github.com/petal-labs/cortex/internal/entity"
+	"github.com/petal-labs/cortex/internal/knowledge"
 	"github.com/petal-labs/cortex/pkg/types"
 )
 
@@ -165,4 +166,46 @@ type errNullAt struct{ path string }
 
 func (e errNullAt) Error() string {
 	return "unexpected null at " + e.path + " (collections must marshal as []/{}, not null)"
+}
+
+// TestSearchResultsStripEmbeddings verifies that chunks carrying populated
+// embedding vectors (as returned by storage search) never serialize them
+// into search responses — a top_k:20 result with 1536-dim vectors would
+// otherwise emit ~30k floats of token-bloating noise.
+func TestSearchResultsStripEmbeddings(t *testing.T) {
+	vec := make([]float32, 1536)
+	for i := range vec {
+		vec[i] = float32(i) * 0.001
+	}
+	result := NewKnowledgeSearch(&knowledge.SearchResult{
+		Results: []*types.ChunkResult{
+			{
+				Chunk: &types.Chunk{
+					ID: "chunk-1", DocumentID: "doc-1", Namespace: "ns", CollectionID: "col-1",
+					Content: "content", Index: 0, Embedding: vec,
+				},
+				Score: 0.9, DocumentTitle: "Doc",
+			},
+		},
+		Query: "q", TotalFound: 1,
+	})
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+	if strings.Contains(s, "embedding") {
+		t.Error("embedding leaked into search response")
+	}
+	// Spot-check the float noise is absent (first/last vector values as decimals).
+	if strings.Contains(s, "0.001") || strings.Contains(s, "1.535") {
+		t.Error("vector floats leaked into search response")
+	}
+	// The useful chunk fields remain.
+	for _, want := range []string{`"id":"chunk-1"`, `"content":"content"`, `"score":0.9`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %s in response, got: %s", want, s)
+		}
+	}
 }

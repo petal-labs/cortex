@@ -26,14 +26,25 @@ func newEntity(e *types.Entity) *Entity {
 	if e == nil {
 		return nil
 	}
+	// Collections are never nil on the wire: clients iterate them directly
+	// (entity.aliases.map(...) etc.) and a JSON null would throw. Nil from
+	// storage becomes an empty [] / {} instead.
+	aliases := e.Aliases
+	if aliases == nil {
+		aliases = []string{}
+	}
+	attributes := e.Attributes
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
 	return &Entity{
 		ID:           e.ID,
 		Namespace:    e.Namespace,
 		Name:         e.Name,
 		Type:         string(e.Type),
-		Aliases:      e.Aliases,
+		Aliases:      aliases,
 		Summary:      e.Summary,
-		Attributes:   e.Attributes,
+		Attributes:   attributes,
 		Metadata:     e.Metadata,
 		MentionCount: e.MentionCount,
 		FirstSeenAt:  e.FirstSeenAt,
@@ -143,7 +154,7 @@ type EntitySearch struct {
 // NewEntitySearch maps an engine search result.
 func NewEntitySearch(r *entity.SearchResult) EntitySearch {
 	if r == nil {
-		return EntitySearch{Contract: Contract{SchemaVersion}}
+		return EntitySearch{Contract: Contract{SchemaVersion}, Results: []EntityResult{}}
 	}
 	out := EntitySearch{
 		Contract:   Contract{SchemaVersion},
@@ -227,7 +238,7 @@ type EntityList struct {
 // NewEntityList maps an engine list result.
 func NewEntityList(r *entity.ListResult) EntityList {
 	if r == nil {
-		return EntityList{Contract: Contract{SchemaVersion}}
+		return EntityList{Contract: Contract{SchemaVersion}, Entities: []Entity{}}
 	}
 	out := EntityList{
 		Contract:   Contract{SchemaVersion},

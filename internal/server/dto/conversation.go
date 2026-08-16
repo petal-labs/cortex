@@ -82,7 +82,7 @@ type ConversationHistory struct {
 // NewConversationHistory maps an engine history result.
 func NewConversationHistory(r *conversation.HistoryResult) ConversationHistory {
 	if r == nil {
-		return ConversationHistory{Contract: Contract{SchemaVersion}}
+		return ConversationHistory{Contract: Contract{SchemaVersion}, Messages: []Message{}}
 	}
 	out := ConversationHistory{
 		Contract:   Contract{SchemaVersion},
@@ -107,7 +107,7 @@ type ConversationSearch struct {
 // NewConversationSearch maps an engine search result.
 func NewConversationSearch(r *conversation.SearchResult) ConversationSearch {
 	if r == nil {
-		return ConversationSearch{Contract: Contract{SchemaVersion}}
+		return ConversationSearch{Contract: Contract{SchemaVersion}, Results: []MessageResult{}}
 	}
 	out := ConversationSearch{
 		Contract: Contract{SchemaVersion},

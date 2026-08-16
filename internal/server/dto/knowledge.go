@@ -138,7 +138,7 @@ type KnowledgeSearch struct {
 // NewKnowledgeSearch maps an engine search result.
 func NewKnowledgeSearch(r *knowledge.SearchResult) KnowledgeSearch {
 	if r == nil {
-		return KnowledgeSearch{Contract: Contract{SchemaVersion}}
+		return KnowledgeSearch{Contract: Contract{SchemaVersion}, Results: []ChunkResult{}}
 	}
 	out := KnowledgeSearch{
 		Contract:   Contract{SchemaVersion},
@@ -218,7 +218,7 @@ type KnowledgeBulkIngest struct {
 // NewKnowledgeBulkIngest maps an engine bulk ingest result.
 func NewKnowledgeBulkIngest(r *knowledge.BulkIngestResult) KnowledgeBulkIngest {
 	if r == nil {
-		return KnowledgeBulkIngest{Contract: Contract{SchemaVersion}}
+		return KnowledgeBulkIngest{Contract: Contract{SchemaVersion}, Documents: []BulkIngestDoc{}}
 	}
 	out := KnowledgeBulkIngest{
 		Contract:       Contract{SchemaVersion},

@@ -31,8 +31,9 @@ type StorageConfig struct {
 	// Pool sizing for pgvector. 0 = unset: the database URL's
 	// pool_max_conns/pool_min_conns query params apply, falling back to
 	// built-in defaults. Explicit values take precedence over the URL.
-	PoolMaxConns int `mapstructure:"pool_max_conns"`
-	PoolMinConns int `mapstructure:"pool_min_conns"`
+	// int32 matches pgxpool's native field type so no conversion is needed.
+	PoolMaxConns int32 `mapstructure:"pool_max_conns"`
+	PoolMinConns int32 `mapstructure:"pool_min_conns"`
 }
 
 // EmbeddingConfig configures embedding generation.

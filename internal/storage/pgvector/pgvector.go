@@ -27,10 +27,6 @@ type Backend struct {
 const (
 	defaultMaxConns = 25
 	defaultMinConns = 5
-
-	// defaultMaxConnsLimit is a hard ceiling on configured pool sizes,
-	// far beyond any sane deployment and within int32 for pgxpool.
-	defaultMaxConnsLimit = 1 << 20
 )
 
 // Ensure Backend implements storage.Backend.
@@ -96,29 +92,22 @@ func New(cfg *config.Config) (*Backend, error) {
 // storage.pool_min_conns, > 0) > database URL query params
 // (pool_max_conns / pool_min_conns, already applied by ParseConfig) >
 // historical defaults. This lets operators tune the pool either way;
-// previously hardcoded values silently stomped both.
+// previously hardcoded values silently stomped both. Config fields are
+// int32 — pgxpool's native type — so no int conversion is involved.
 func applyPoolSizing(poolConfig *pgxpool.Config, cfg *config.Config) error {
 	urlQuery := url.Values{}
 	if u, err := url.Parse(cfg.Storage.DatabaseURL); err == nil {
 		urlQuery = u.Query()
 	}
 
-	// Config validation bounds these to sane values; the guards keep the
-	// int->int32 conversions overflow-safe regardless of construction path.
-	if v := cfg.Storage.PoolMaxConns; v > 0 {
-		if v > defaultMaxConnsLimit {
-			v = defaultMaxConnsLimit
-		}
-		poolConfig.MaxConns = int32(v)
+	if cfg.Storage.PoolMaxConns > 0 {
+		poolConfig.MaxConns = cfg.Storage.PoolMaxConns
 	} else if !urlQuery.Has("pool_max_conns") {
 		poolConfig.MaxConns = defaultMaxConns
 	}
 
-	if v := cfg.Storage.PoolMinConns; v > 0 {
-		if v > defaultMaxConnsLimit {
-			v = defaultMaxConnsLimit
-		}
-		poolConfig.MinConns = int32(v)
+	if cfg.Storage.PoolMinConns > 0 {
+		poolConfig.MinConns = cfg.Storage.PoolMinConns
 	} else if !urlQuery.Has("pool_min_conns") {
 		poolConfig.MinConns = defaultMinConns
 	}

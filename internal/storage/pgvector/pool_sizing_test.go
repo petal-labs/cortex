@@ -21,7 +21,7 @@ func parsePoolConfig(t *testing.T, dbURL string) *pgxpool.Config {
 	return poolConfig
 }
 
-func storageCfg(dbURL string, maxConns, minConns int) *config.Config {
+func storageCfg(dbURL string, maxConns, minConns int32) *config.Config {
 	return &config.Config{
 		Storage: config.StorageConfig{
 			Backend:      "pgvector",

@@ -517,7 +517,7 @@ func TestCollectionStats(t *testing.T) {
 	if stats.ChunkCount == 0 {
 		t.Error("expected at least one chunk")
 	}
-	if stats.LastIngest.IsZero() {
+	if stats.LastIngest == nil || stats.LastIngest.IsZero() {
 		t.Error("expected non-zero last ingest time")
 	}
 }

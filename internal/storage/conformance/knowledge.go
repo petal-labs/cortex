@@ -134,6 +134,16 @@ func testKnowledge(ctx context.Context, t *testing.T, b storage.Backend, dims in
 		if got.Title != "Document doc-crud" {
 			t.Errorf("expected title 'Document doc-crud', got %q", got.Title)
 		}
+		// Timestamps must never read back zero — a zero time serializes as
+		// the misleading "0001-01-01T00:00:00Z". (pgvector's documents
+		// table tracks creation time only; its backend falls UpdatedAt
+		// back to CreatedAt.)
+		if got.CreatedAt.IsZero() {
+			t.Error("expected CreatedAt to be populated")
+		}
+		if got.UpdatedAt.IsZero() {
+			t.Error("expected UpdatedAt to be populated")
+		}
 	})
 
 	t.Run("GetDocumentNotFound", func(t *testing.T) {

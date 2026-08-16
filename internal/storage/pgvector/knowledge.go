@@ -186,6 +186,13 @@ func (b *Backend) InsertDocument(ctx context.Context, doc *types.Document) error
 		}
 	}
 
+	// The documents table tracks creation time only; keep the struct's
+	// UpdatedAt coherent so callers never see a zero time they might
+	// serialize as "0001-01-01T00:00:00Z".
+	if doc.UpdatedAt.IsZero() {
+		doc.UpdatedAt = doc.CreatedAt
+	}
+
 	_, err := b.pool.Exec(ctx, `
 		INSERT INTO documents (id, namespace, collection_id, title, source, content_type, metadata, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -277,6 +284,13 @@ func (b *Backend) GetDocument(ctx context.Context, namespace, docID string) (*ty
 		if err := json.Unmarshal(metadataJSON, &doc.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
+	}
+
+	// The documents table tracks creation time only; without this
+	// fallback UpdatedAt would stay zero and serialize as the misleading
+	// "0001-01-01T00:00:00Z".
+	if doc.UpdatedAt.IsZero() {
+		doc.UpdatedAt = doc.CreatedAt
 	}
 
 	return doc, nil
@@ -406,7 +420,7 @@ func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID s
 		return nil, fmt.Errorf("failed to get last ingest: %w", err)
 	}
 	if lastIngest != nil {
-		stats.LastIngest = *lastIngest
+		stats.LastIngest = lastIngest
 	}
 
 	return stats, nil

@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -552,7 +554,7 @@ func TestCollectionStats(t *testing.T) {
 	if stats.TotalTokens != 750 {
 		t.Errorf("expected 750 total tokens, got %d", stats.TotalTokens)
 	}
-	if stats.LastIngest.IsZero() {
+	if stats.LastIngest == nil || stats.LastIngest.IsZero() {
 		t.Error("expected LastIngest to be set")
 	}
 }
@@ -598,5 +600,17 @@ func TestCollectionStatsEmpty(t *testing.T) {
 	}
 	if stats.TotalTokens != 0 {
 		t.Errorf("expected 0 tokens, got %d", stats.TotalTokens)
+	}
+	// Never-ingested collections omit last_ingest entirely (nil pointer)
+	// instead of serializing a misleading "0001-01-01T00:00:00Z".
+	if stats.LastIngest != nil {
+		t.Errorf("expected nil LastIngest for empty collection, got %v", stats.LastIngest)
+	}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		t.Fatalf("failed to marshal stats: %v", err)
+	}
+	if strings.Contains(string(data), "last_ingest") || strings.Contains(string(data), "0001-01-01") {
+		t.Errorf("expected last_ingest omitted from JSON, got: %s", data)
 	}
 }

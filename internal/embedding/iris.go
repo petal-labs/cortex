@@ -128,7 +128,15 @@ func (c *IrisClient) embedSingleBatch(ctx context.Context, texts []string) ([][]
 	}
 
 	if len(nonEmpty) == 0 {
-		// All inputs were empty, return zero vectors
+		// All inputs were empty, return zero vectors. The width must be
+		// knowable: with dimensions unset there is no provider response to
+		// infer it from, and synthesizing zero-LENGTH vectors would produce
+		// ragged output downstream. Config validation requires dimensions
+		// > 0, so this only trips on direct construction — reject with an
+		// actionable message rather than emit a malformed vector.
+		if c.dimensions <= 0 {
+			return nil, fmt.Errorf("%w: cannot synthesize zero vectors for an all-empty batch: embedding dimensions are unset; set embedding.dimensions in config", ErrProviderFailed)
+		}
 		result := make([][]float32, len(texts))
 		for i := range result {
 			result[i] = make([]float32, c.dimensions)

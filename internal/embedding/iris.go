@@ -63,16 +63,60 @@ func (c *IrisClient) Embed(ctx context.Context, text string) ([]float32, error) 
 	return embeddings[0], nil
 }
 
-// EmbedBatch generates embeddings for multiple texts in a single call.
+// EmbedBatch generates embeddings for multiple texts, automatically
+// splitting inputs that exceed the configured batch size into sub-batches
+// and concatenating the results. A document that produces more chunks than
+// batch_size no longer fails the whole embed — it is processed in
+// batch_size-sized provider calls.
 func (c *IrisClient) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
 
-	if len(texts) > c.batchSize {
-		return nil, fmt.Errorf("%w: %d texts exceeds limit of %d", ErrBatchTooLarge, len(texts), c.batchSize)
+	batchSize := c.batchSize
+	if batchSize <= 0 {
+		batchSize = len(texts) // no configured limit: single call
 	}
 
+	// Cortex calls the embedding provider directly rather than through a
+	// core.Client, so iris's own execution timeout does not apply here. Impose
+	// our own deadline so a hung provider call fails fast with a legible
+	// context.DeadlineExceeded instead of blocking until the caller cancels.
+	// Only applied when the caller supplied no deadline of its own, so a tighter
+	// caller budget still wins; timeout <= 0 disables it (unbounded). Applied
+	// once around all sub-batches so the total is bounded by a single
+	// deadline rather than one per sub-batch.
+	if c.timeout > 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.timeout)
+			defer cancel()
+		}
+	}
+
+	if len(texts) <= batchSize {
+		return c.embedSingleBatch(ctx, texts)
+	}
+
+	result := make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += batchSize {
+		end := start + batchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		part, err := c.embedSingleBatch(ctx, texts[start:end])
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, part...)
+	}
+	return result, nil
+}
+
+// embedSingleBatch sends one provider request for texts (which the caller
+// has already capped at the batch size) and maps the response back to the
+// input positions.
+func (c *IrisClient) embedSingleBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	// Filter out empty strings and track indices
 	nonEmpty := make([]core.EmbeddingInput, 0, len(texts))
 	indices := make([]int, 0, len(texts))
@@ -101,20 +145,6 @@ func (c *IrisClient) EmbedBatch(ctx context.Context, texts []string) ([][]float3
 	// Set dimensions if specified
 	if c.dimensions > 0 {
 		req.Dimensions = &c.dimensions
-	}
-
-	// Cortex calls the embedding provider directly rather than through a
-	// core.Client, so iris's own execution timeout does not apply here. Impose
-	// our own deadline so a hung provider call fails fast with a legible
-	// context.DeadlineExceeded instead of blocking until the caller cancels.
-	// Only applied when the caller supplied no deadline of its own, so a tighter
-	// caller budget still wins; timeout <= 0 disables it (unbounded).
-	if c.timeout > 0 {
-		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, c.timeout)
-			defer cancel()
-		}
 	}
 
 	// Call the iris SDK with retry on transient failures.

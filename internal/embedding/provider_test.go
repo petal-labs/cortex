@@ -255,7 +255,7 @@ func TestIrisClientEmptyProvider(t *testing.T) {
 	}
 }
 
-func TestIrisClientBatchTooLarge(t *testing.T) {
+func TestIrisClientEmbedBatchAutoSplitsIntegration(t *testing.T) {
 	// Skip if no API key - this is an integration test
 	if os.Getenv("OPENAI_API_KEY") == "" {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
@@ -271,9 +271,14 @@ func TestIrisClientBatchTooLarge(t *testing.T) {
 	}
 
 	texts := []string{"a", "b", "c"} // 3 texts but batch size is 2
-	_, err = client.EmbedBatch(context.Background(), texts)
-	if err == nil {
-		t.Error("expected error for batch too large")
+	embs, err := client.EmbedBatch(context.Background(), texts)
+	if err != nil {
+		// Provider-side failures (quota, network, model access) say nothing
+		// about the splitting contract — the unit tests cover that.
+		t.Skipf("live provider unavailable, skipping: %v", err)
+	}
+	if len(embs) != len(texts) {
+		t.Errorf("expected %d embeddings, got %d", len(texts), len(embs))
 	}
 }
 

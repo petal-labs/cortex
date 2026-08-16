@@ -17,6 +17,7 @@ import (
 	"github.com/petal-labs/cortex/internal/entity"
 	"github.com/petal-labs/cortex/internal/knowledge"
 	"github.com/petal-labs/cortex/internal/storage/sqlite"
+	"github.com/petal-labs/cortex/pkg/types"
 )
 
 // mockEmbeddingProvider implements embedding.Provider for testing.
@@ -825,26 +826,134 @@ func TestMapEntityType(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
+		ok       bool
 	}{
-		{"person", "person"},
-		{"PERSON", "person"},
-		{"organization", "organization"},
-		{"Organization", "organization"},
-		{"product", "product"},
-		{"location", "location"},
-		{"concept", "concept"},
-		{"event", "concept"},   // event maps to concept
-		{"other", "product"},   // other maps to product
-		{"unknown", "product"}, // unknown maps to product
+		{"person", "person", true},
+		{"PERSON", "person", true},
+		{"organization", "organization", true},
+		{"Organization", "organization", true},
+		{"product", "product", true},
+		{"location", "location", true},
+		{"concept", "concept", true},
+		{"event", "event", true}, // real type, no longer remapped to concept
+		{"other", "other", true}, // real type, no longer remapped to product
+		{"unknown", "", false},   // rejected, no longer remapped to product
+		{"", "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := mapEntityType(tt.input)
+			result, ok := mapEntityType(tt.input)
+			if ok != tt.ok {
+				t.Errorf("mapEntityType(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
 			if string(result) != tt.expected {
 				t.Errorf("mapEntityType(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestParseEntityTypeArg(t *testing.T) {
+	t.Run("absent returns nil", func(t *testing.T) {
+		got, errResult := parseEntityTypeArg(map[string]any{})
+		if errResult != nil {
+			t.Fatalf("unexpected error: %s", getTextContent(errResult))
+		}
+		if got != nil {
+			t.Errorf("expected nil type, got %v", *got)
+		}
+	})
+
+	t.Run("event accepted", func(t *testing.T) {
+		got, errResult := parseEntityTypeArg(map[string]any{"type": "event"})
+		if errResult != nil {
+			t.Fatalf("unexpected error: %s", getTextContent(errResult))
+		}
+		if got == nil || *got != "event" {
+			t.Errorf("expected event, got %v", got)
+		}
+	})
+
+	t.Run("unsupported value rejected", func(t *testing.T) {
+		_, errResult := parseEntityTypeArg(map[string]any{"type": "bogus"})
+		if errResult == nil {
+			t.Fatal("expected error for unsupported type, got nil")
+		}
+		msg := getTextContent(errResult)
+		if !strings.Contains(msg, "unsupported value") || !strings.Contains(msg, "bogus") {
+			t.Errorf("expected clear unsupported-value message, got: %s", msg)
+		}
+	})
+
+	t.Run("wrong type rejected", func(t *testing.T) {
+		_, errResult := parseEntityTypeArg(map[string]any{"type": 123})
+		if errResult == nil {
+			t.Fatal("expected error for non-string type, got nil")
+		}
+	})
+}
+
+// TestEntitySearchTypeFilterNotRemapped verifies end to end that filtering
+// by "event"/"other" matches only entities of that exact type — the old
+// code silently remapped event→concept and other→product.
+func TestEntitySearchTypeFilterNotRemapped(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Create one entity of each type directly through the engine.
+	for _, name := range []string{"ev-1", "ot-1", "pr-1", "co-1"} {
+		typ := map[string]types.EntityType{
+			"ev-1": "event",
+			"ot-1": "other",
+			"pr-1": "product",
+			"co-1": "concept",
+		}[name]
+		if _, err := srv.entity.Create(ctx, "test-ns", name, typ, nil); err != nil {
+			t.Fatalf("failed to create %s: %v", name, err)
+		}
+	}
+
+	list := func(typeArg string) []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	} {
+		t.Helper()
+		result, err := srv.handleEntityList(ctx, makeToolRequest("entity_list", map[string]any{
+			"namespace": "test-ns",
+			"type":      typeArg,
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected tool error: %s", getTextContent(result))
+		}
+		var resp struct {
+			Entities []struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			} `json:"entities"`
+		}
+		if err := json.Unmarshal([]byte(getTextContent(result)), &resp); err != nil {
+			t.Fatalf("failed to parse result: %v", err)
+		}
+		return resp.Entities
+	}
+
+	if ents := list("event"); len(ents) != 1 || ents[0].Name != "ev-1" || ents[0].Type != "event" {
+		t.Errorf("event filter: expected exactly [ev-1/event], got %+v", ents)
+	}
+	if ents := list("other"); len(ents) != 1 || ents[0].Name != "ot-1" || ents[0].Type != "other" {
+		t.Errorf("other filter: expected exactly [ot-1/other], got %+v", ents)
+	}
+	// The old bug: product filter would have returned ot-1 (remapped other).
+	if ents := list("product"); len(ents) != 1 || ents[0].Name != "pr-1" {
+		t.Errorf("product filter: expected exactly [pr-1], got %+v", ents)
+	}
+	// The old bug: concept filter would have returned ev-1 (remapped event).
+	if ents := list("concept"); len(ents) != 1 || ents[0].Name != "co-1" {
+		t.Errorf("concept filter: expected exactly [co-1], got %+v", ents)
 	}
 }
 

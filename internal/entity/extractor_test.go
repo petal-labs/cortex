@@ -425,7 +425,9 @@ func TestToEntityType(t *testing.T) {
 		{"product", "product"},
 		{"location", "location"},
 		{"concept", "concept"},
-		{"unknown", "concept"}, // Defaults to concept
+		{"event", "event"},
+		{"other", "other"},
+		{"unknown", "concept"}, // Unreachable for validated input
 		{"", "concept"},
 	}
 
@@ -433,6 +435,21 @@ func TestToEntityType(t *testing.T) {
 		result := ToEntityType(tt.input)
 		if string(result) != tt.expected {
 			t.Errorf("ToEntityType(%q) = %s, expected %s", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// TestIsValidEntityTypeEventOther verifies extraction validation accepts the
+// full advertised type set (single source of truth: engine ValidEntityTypes).
+func TestIsValidEntityTypeEventOther(t *testing.T) {
+	for _, valid := range []string{"person", "organization", "product", "location", "concept", "event", "other", "Event", " OTHER "} {
+		if !isValidEntityType(valid) {
+			t.Errorf("expected %q to be valid", valid)
+		}
+	}
+	for _, invalid := range []string{"", "bogus", "company"} {
+		if isValidEntityType(invalid) {
+			t.Errorf("expected %q to be invalid", invalid)
 		}
 	}
 }

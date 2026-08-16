@@ -259,7 +259,11 @@ func loadConfig(configPath string) (*config.Config, error) {
 	}
 
 	// Use default config
-	return config.DefaultConfig(), nil
+	cfg := config.DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // queueStatsAdapter adapts the storage backend to provide queue statistics.

@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -133,7 +132,7 @@ func (s *Server) registerConversationTools() {
 			mcp.Description("Message content"),
 		),
 		mcp.WithObject("metadata",
-			mcp.Description("Optional key-value metadata"),
+			mcp.Description("Optional key-value metadata. Values must be strings; send numbers as strings (e.g. \"3\")"),
 		),
 		mcp.WithNumber("max_content_length",
 			mcp.Description("Truncate content exceeding this character count (optional, useful for large tool outputs)"),
@@ -241,7 +240,7 @@ func (s *Server) registerKnowledgeTools() {
 			mcp.Description("Origin URL or file path"),
 		),
 		mcp.WithObject("metadata",
-			mcp.Description("Filterable key-value metadata"),
+			mcp.Description("Filterable key-value metadata. Values must be strings; send numbers as strings (e.g. \"3\")"),
 		),
 		mcp.WithObject("chunk_config",
 			mcp.Description("Override collection's default chunking (optional)"),
@@ -271,7 +270,7 @@ func (s *Server) registerKnowledgeTools() {
 			mcp.Description("Minimum similarity threshold 0.0-1.0 (default: 0.0)"),
 		),
 		mcp.WithObject("filters",
-			mcp.Description("Metadata key-value filters (optional)"),
+			mcp.Description("Metadata key-value filters (optional). Values must be strings, matched exactly against stored string metadata"),
 		),
 		mcp.WithBoolean("include_context",
 			mcp.Description("Include adjacent chunks for context (default: true)"),
@@ -558,7 +557,7 @@ func (s *Server) registerEntityTools() {
 			mcp.Description("Entity name or alias"),
 		),
 		mcp.WithObject("attributes",
-			mcp.Description("Key-value attributes to set or update"),
+			mcp.Description("Key-value attributes to set or update. Values must be strings"),
 		),
 		mcp.WithArray("aliases",
 			mcp.Description("Additional aliases to add"),
@@ -853,7 +852,11 @@ func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolR
 	args := req.GetArguments()
 
 	if metadata, ok := args["metadata"].(map[string]any); ok {
-		opts.Metadata = toStringMap(metadata)
+		var errResult *mcp.CallToolResult
+		opts.Metadata, errResult = toStringMap(metadata, "metadata")
+		if errResult != nil {
+			return errResult, nil
+		}
 	}
 
 	maxLen, errResult := optInt(args, "max_content_length", 0)
@@ -1030,7 +1033,10 @@ func (s *Server) handleKnowledgeIngest(ctx context.Context, req mcp.CallToolRequ
 	}
 
 	if metadata, ok := args["metadata"].(map[string]any); ok {
-		opts.Metadata = toStringMap(metadata)
+		opts.Metadata, errResult = toStringMap(metadata, "metadata")
+		if errResult != nil {
+			return errResult, nil
+		}
 	}
 
 	if chunkConfig, ok := args["chunk_config"].(map[string]any); ok {
@@ -1079,7 +1085,11 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 	}
 
 	if filters, ok := args["filters"].(map[string]any); ok {
-		opts.Filters = toStringMap(filters)
+		var errResult *mcp.CallToolResult
+		opts.Filters, errResult = toStringMap(filters, "filters")
+		if errResult != nil {
+			return errResult, nil
+		}
 	}
 
 	includeContext, errResult := optBool(args, "include_context", true)
@@ -1235,7 +1245,11 @@ func (s *Server) handleKnowledgeBulkIngest(ctx context.Context, req mcp.CallTool
 			doc.ContentType = contentType
 		}
 		if metadata, ok := docMap["metadata"].(map[string]any); ok {
-			doc.Metadata = toStringMap(metadata)
+			var msg string
+			doc.Metadata, msg = toStringMapMessage(metadata, "metadata")
+			if msg != "" {
+				return mcp.NewToolResultError(fmt.Sprintf("document %d: %s", i, msg)), nil
+			}
 		}
 
 		documents = append(documents, doc)
@@ -1630,7 +1644,11 @@ func (s *Server) handleEntityUpdate(ctx context.Context, req mcp.CallToolRequest
 	// Build update options
 	opts := entity.UpdateOpts{}
 	if attributes, ok := req.GetArguments()["attributes"].(map[string]any); ok {
-		opts.Attributes = toStringMap(attributes)
+		var errResult *mcp.CallToolResult
+		opts.Attributes, errResult = toStringMap(attributes, "attributes")
+		if errResult != nil {
+			return errResult, nil
+		}
 	}
 
 	// Update the entity
@@ -1768,20 +1786,35 @@ func parseChunkConfig(m map[string]any) *types.ChunkConfig {
 	return cfg
 }
 
-// toStringMap converts map[string]any to map[string]string.
-func toStringMap(m map[string]any) map[string]string {
+// toStringMap converts a map[string]any argument to map[string]string,
+// enforcing the string-only metadata contract. Metadata, filters, and
+// attributes are stored and compared as strings end-to-end; silently
+// stringifying a non-string value corrupted the data ({"count":3} became
+// {"count":"3"}), so present-but-non-string values are rejected with an
+// actionable message instead.
+func toStringMap(m map[string]any, argName string) (map[string]string, *mcp.CallToolResult) {
+	result, msg := toStringMapMessage(m, argName)
+	if msg != "" {
+		return nil, mcp.NewToolResultError(msg)
+	}
+	return result, nil
+}
+
+// toStringMapMessage is the message-level core of toStringMap, for callers
+// that need to wrap the violation in their own error context (e.g. bulk
+// ingest's per-document index).
+func toStringMapMessage(m map[string]any, argName string) (map[string]string, string) {
 	result := make(map[string]string, len(m))
 	for k, v := range m {
-		if s, ok := v.(string); ok {
-			result[k] = s
-		} else {
-			// Convert other types to string via JSON
-			if data, err := json.Marshal(v); err == nil {
-				result[k] = string(data)
-			}
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Sprintf(
+				"parameter %q values must be strings; key %q has a %s value (send %q as a string)",
+				argName, k, argTypeName(v), fmt.Sprintf("%v", v))
 		}
+		result[k] = s
 	}
-	return result
+	return result, ""
 }
 
 // mapEntityType converts an API entity type string to the internal

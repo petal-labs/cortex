@@ -23,6 +23,7 @@ var (
 	ErrDocumentNotFound   = errors.New("document not found")
 	ErrCollectionExists   = errors.New("collection already exists")
 	ErrEmbeddingRequired  = errors.New("embedding provider required for search")
+	ErrEmbeddingFailed    = errors.New("embedding generation failed")
 	ErrInvalidChunkConfig = errors.New("invalid chunk configuration")
 )
 
@@ -192,8 +193,7 @@ func (e *Engine) Ingest(ctx context.Context, namespace, collectionID, content st
 	if e.embedding != nil {
 		embeddings, err = e.embedding.EmbedBatch(ctx, chunkTexts)
 		if err != nil {
-			// Log but don't fail - chunks will be stored without embeddings
-			embeddings = nil
+			return nil, fmt.Errorf("%w: %v", ErrEmbeddingFailed, err)
 		}
 	}
 

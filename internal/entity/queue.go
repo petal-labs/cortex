@@ -11,9 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/petal-labs/iris/core"
-
 	"github.com/petal-labs/cortex/internal/config"
+	"github.com/petal-labs/cortex/internal/llm"
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
 )
@@ -394,13 +393,19 @@ func (q *QueueProcessor) handleFailure(ctx context.Context, item *types.Extracti
 
 	// Permanent failures (bad API key, malformed request, decode errors)
 	// will never succeed on retry — dead-letter immediately instead of
-	// burning maxAttempts against the provider.
-	if isNonRetryableError(processErr) {
+	// burning maxAttempts against the provider. Classification comes from
+	// the shared iris taxonomy; the RequestID is surfaced for support.
+	if kind, pgErr := llm.ClassifyError(processErr); kind == llm.ErrorKindPermanent {
 		status := "dead_letter"
 		if q.cfg.ExtractionDeadLetterPolicy == "drop" {
 			status = "dropped"
 		}
-		log.Printf("extraction failed with non-retryable error, dead-lettering item %d: %v", item.ID, processErr)
+		if pgErr != nil {
+			log.Printf("extraction failed with permanent error (%s status=%d code=%q request_id=%s), dead-lettering item %d: %v",
+				pgErr.Provider, pgErr.Status, pgErr.Code, pgErr.RequestID, item.ID, processErr)
+		} else {
+			log.Printf("extraction failed with non-retryable error, dead-lettering item %d: %v", item.ID, processErr)
+		}
 		if err := q.storage.CompleteExtraction(context.Background(), item.ID, status); err != nil {
 			log.Printf("failed to mark as dead letter: %v", err)
 		}
@@ -437,17 +442,6 @@ func (q *QueueProcessor) handleFailure(ctx context.Context, item *types.Extracti
 	}
 	log.Printf("extraction failed (attempt %d/%d), will retry after %v: %v",
 		item.Attempts, maxAttempts, delay, processErr)
-}
-
-// isNonRetryableError reports whether an extraction error is permanent:
-// retrying would produce the same outcome, so the item should go straight
-// to the dead letter queue. Covers iris's non-retryable sentinels (auth,
-// request shape, decoding) which survive error wrapping.
-func isNonRetryableError(err error) bool {
-	return errors.Is(err, core.ErrUnauthorized) ||
-		errors.Is(err, core.ErrBadRequest) ||
-		errors.Is(err, core.ErrDecode) ||
-		errors.Is(err, core.ErrNotSupported)
 }
 
 // calculateBackoff calculates the backoff delay for a retry.

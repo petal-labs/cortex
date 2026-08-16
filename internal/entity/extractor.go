@@ -152,6 +152,11 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 
 	resp, err := builder.GetResponse(ctx)
 	if err != nil {
+		// Surface the typed classification (kind, status, code,
+		// request_id) for alerting; the queue's dead-lettering keys off
+		// the same taxonomy. Retry itself is handled inside iris's
+		// core.Client.
+		llm.LogProviderError(ctx, "entity_extraction", err)
 		return nil, fmt.Errorf("extraction completion failed: %w", err)
 	}
 

@@ -276,3 +276,131 @@ func TestIrisClientEmbedConsistentUnsetDimensions(t *testing.T) {
 		}
 	}
 }
+
+// shuffledProvider returns vectors in reverse order with correct .Index
+// fields, simulating a provider that does not guarantee response order.
+type shuffledProvider struct {
+	dims int
+}
+
+func (s *shuffledProvider) CreateEmbeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	vectors := make([]core.EmbeddingVector, len(req.Input))
+	for i := range vectors {
+		// Position i in the response carries the vector for input index
+		// len-1-i (reversed), with .Index telling the truth.
+		j := len(req.Input) - 1 - i
+		vec := make([]float32, s.dims)
+		vec[0] = float32(j) // identifiable per input
+		vectors[i] = core.EmbeddingVector{Index: j, Vector: vec}
+	}
+	return &core.EmbeddingResponse{Vectors: vectors}, nil
+}
+
+// TestIrisClientEmbedBatchMapsByIndex verifies that an out-of-order response
+// is reassembled by each vector's .Index field, not response position.
+func TestIrisClientEmbedBatchMapsByIndex(t *testing.T) {
+	fake := &shuffledProvider{dims: 2}
+	c := &IrisClient{provider: fake, dimensions: 2, batchSize: 10}
+
+	embs, err := c.EmbedBatch(context.Background(), []string{"zero", "one", "two"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(embs) != 3 {
+		t.Fatalf("expected 3 embeddings, got %d", len(embs))
+	}
+	for i, e := range embs {
+		if len(e) != 2 {
+			t.Fatalf("expected embedding %d to have 2 dims, got %d", i, len(e))
+		}
+		if e[0] != float32(i) {
+			t.Errorf("embedding %d attached vector for input %d (position-based mapping bug)", i, int(e[0]))
+		}
+	}
+}
+
+// TestIrisClientEmbedBatchMapsByIndexWithEmptyInputs verifies the index
+// mapping still lands correctly when empty inputs shift the original
+// positions.
+func TestIrisClientEmbedBatchMapsByIndexWithEmptyInputs(t *testing.T) {
+	fake := &shuffledProvider{dims: 1}
+	c := &IrisClient{provider: fake, dimensions: 1, batchSize: 10}
+
+	// Input 0 is empty; "alpha" is nonEmpty[0] → original position 1,
+	// "beta" is nonEmpty[1] → original position 2.
+	embs, err := c.EmbedBatch(context.Background(), []string{"", "alpha", "beta"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Zero vector for the empty input.
+	if embs[0][0] != 0 {
+		t.Errorf("expected zero vector for empty input, got %v", embs[0])
+	}
+	// shuffledProvider marks each vector with its nonEmpty index.
+	if embs[1][0] != 0 {
+		t.Errorf("expected 'alpha' to carry nonEmpty index 0, got %v", embs[1][0])
+	}
+	if embs[2][0] != 1 {
+		t.Errorf("expected 'beta' to carry nonEmpty index 1, got %v", embs[2][0])
+	}
+}
+
+// outOfBoundsProvider returns a vector with an index beyond the input count.
+type outOfBoundsProvider struct {
+	index int
+	dims  int
+}
+
+func (o *outOfBoundsProvider) CreateEmbeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	vec := make([]float32, o.dims)
+	return &core.EmbeddingResponse{Vectors: []core.EmbeddingVector{{Index: o.index, Vector: vec}}}, nil
+}
+
+// TestIrisClientEmbedBatchIndexOutOfBounds verifies an out-of-range index
+// fails loudly instead of panicking or silently misplacing the vector.
+func TestIrisClientEmbedBatchIndexOutOfBounds(t *testing.T) {
+	fake := &outOfBoundsProvider{index: 5, dims: 2}
+	c := &IrisClient{provider: fake, dimensions: 2, batchSize: 10}
+
+	_, err := c.EmbedBatch(context.Background(), []string{"one"})
+	if err == nil {
+		t.Fatal("expected out-of-range index error, got nil")
+	}
+	if !errors.Is(err, ErrProviderFailed) {
+		t.Errorf("expected ErrProviderFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("expected out-of-range message, got: %v", err)
+	}
+}
+
+// duplicateIndexProvider returns two vectors that both claim index 0.
+type duplicateIndexProvider struct {
+	dims int
+}
+
+func (d *duplicateIndexProvider) CreateEmbeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	vec := make([]float32, d.dims)
+	return &core.EmbeddingResponse{Vectors: []core.EmbeddingVector{
+		{Index: 0, Vector: vec},
+		{Index: 0, Vector: vec},
+	}}, nil
+}
+
+// TestIrisClientEmbedBatchDuplicateIndex verifies duplicate indices fail
+// loudly instead of silently overwriting one input's vector with another's.
+func TestIrisClientEmbedBatchDuplicateIndex(t *testing.T) {
+	fake := &duplicateIndexProvider{dims: 2}
+	c := &IrisClient{provider: fake, dimensions: 2, batchSize: 10}
+
+	_, err := c.EmbedBatch(context.Background(), []string{"one", "two"})
+	if err == nil {
+		t.Fatal("expected duplicate index error, got nil")
+	}
+	if !errors.Is(err, ErrProviderFailed) {
+		t.Errorf("expected ErrProviderFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "duplicates index") {
+		t.Errorf("expected duplicate-index message, got: %v", err)
+	}
+}

@@ -173,7 +173,12 @@ retryLoop:
 		}
 	}
 
-	// Map embeddings back to original indices, filling empty inputs with zero vectors
+	// Map embeddings back to original indices, filling empty inputs with
+	// zero vectors. Each vector is placed using its .Index field (iris
+	// exposes it precisely because response order is not guaranteed) rather
+	// than its position in the response slice, with bounds and duplicate
+	// validation so an out-of-order or malformed response can never attach
+	// a vector to the wrong text.
 	result := make([][]float32, len(texts))
 	dims := c.dimensions
 	if dims == 0 && len(resp.Vectors) > 0 && len(resp.Vectors[0].Vector) > 0 {
@@ -182,10 +187,18 @@ retryLoop:
 	for i := range result {
 		result[i] = make([]float32, dims)
 	}
-	for i, idx := range indices {
-		if i < len(resp.Vectors) {
-			result[idx] = resp.Vectors[i].Vector
+	seen := make([]bool, len(indices))
+	for pos, v := range resp.Vectors {
+		if v.Index < 0 || v.Index >= len(indices) {
+			return nil, fmt.Errorf("%w: embedding at response position %d has index %d out of range [0, %d)",
+				ErrProviderFailed, pos, v.Index, len(indices))
 		}
+		if seen[v.Index] {
+			return nil, fmt.Errorf("%w: embedding at response position %d duplicates index %d",
+				ErrProviderFailed, pos, v.Index)
+		}
+		seen[v.Index] = true
+		result[indices[v.Index]] = v.Vector
 	}
 
 	return result, nil

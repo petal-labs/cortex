@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -914,4 +916,33 @@ func getTextContent(result *mcp.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+func TestToolErrorSanitizesInternalErrors(t *testing.T) {
+	// A non-sentinel error (e.g. a raw DB error) should be sanitized.
+	result, _ := toolError(fmt.Errorf("pq: connection refused at postgres://internal:5432"))
+
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	msg := getTextContent(result)
+	if strings.Contains(msg, "postgres://") || strings.Contains(msg, "connection refused") {
+		t.Errorf("internal error details leaked to client: %s", msg)
+	}
+	if !strings.Contains(msg, "internal server error") {
+		t.Errorf("expected sanitized message, got: %s", msg)
+	}
+}
+
+func TestToolErrorExposesClientErrors(t *testing.T) {
+	// Known sentinel errors should be exposed as-is.
+	result, _ := toolError(knowledge.ErrCollectionNotFound)
+
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	msg := getTextContent(result)
+	if !strings.Contains(msg, "collection not found") {
+		t.Errorf("expected client error message, got: %s", msg)
+	}
 }

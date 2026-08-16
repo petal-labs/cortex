@@ -3,6 +3,7 @@ package entity
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +164,98 @@ func TestParseExtractionResponse(t *testing.T) {
 
 		if len(entities) != 1 {
 			t.Errorf("expected 1 entity, got %d", len(entities))
+		}
+	})
+
+	t.Run("ignores brackets in prose before the JSON array", func(t *testing.T) {
+		// The old first-'['-to-last-']' slice started at "[listed below]"
+		// and produced unparseable output.
+		response := "entities [listed below]: [{\"name\": \"Acme Corp\", \"type\": \"organization\", \"confidence\": 0.9}]"
+
+		entities, err := parseExtractionResponse(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if entities[0].Name != "Acme Corp" {
+			t.Errorf("expected 'Acme Corp', got %q", entities[0].Name)
+		}
+	})
+
+	t.Run("handles closing bracket inside attribute value", func(t *testing.T) {
+		response := "[{\"name\": \"Acme Corp\", \"type\": \"organization\", \"attributes\": {\"note\": \"see appendix [3] for details\"}, \"confidence\": 0.9}]"
+
+		entities, err := parseExtractionResponse(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if entities[0].Attributes["note"] != "see appendix [3] for details" {
+			t.Errorf("attribute value corrupted: %q", entities[0].Attributes["note"])
+		}
+	})
+
+	t.Run("handles brackets in trailing prose after the array", func(t *testing.T) {
+		response := "[{\"name\": \"Acme Corp\", \"type\": \"organization\", \"confidence\": 0.9}]\n\nNote: other models [GPT-4] may differ."
+
+		entities, err := parseExtractionResponse(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if entities[0].Name != "Acme Corp" {
+			t.Errorf("expected 'Acme Corp', got %q", entities[0].Name)
+		}
+	})
+
+	t.Run("skips unrelated JSON values in prose", func(t *testing.T) {
+		response := "Confidence bands [0.2, 0.5] were considered.\nEntities: [{\"name\": \"Jane\", \"type\": \"person\", \"confidence\": 0.8}]"
+
+		entities, err := parseExtractionResponse(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if entities[0].Name != "Jane" {
+			t.Errorf("expected 'Jane', got %q", entities[0].Name)
+		}
+	})
+
+	t.Run("handles escaped quotes containing brackets", func(t *testing.T) {
+		response := "[{\"name\": \"Quote \\\" [weird] \\\" Corp\", \"type\": \"organization\", \"confidence\": 0.9}]"
+
+		entities, err := parseExtractionResponse(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if !strings.Contains(entities[0].Name, "[weird]") {
+			t.Errorf("expected name to contain '[weird]', got %q", entities[0].Name)
+		}
+	})
+
+	t.Run("finds object-wrapped entities embedded in prose", func(t *testing.T) {
+		response := "Sure! Here is the result:\n{\"entities\": [{\"name\": \"Acme Corp\", \"type\": \"organization\", \"confidence\": 0.9}]}\nHope that helps."
+
+		entities, err := parseExtractionResponse(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if entities[0].Name != "Acme Corp" {
+			t.Errorf("expected 'Acme Corp', got %q", entities[0].Name)
 		}
 	})
 

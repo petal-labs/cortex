@@ -188,49 +188,122 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 // and the raw array form ([...]) returned by providers that ignore the
 // schema root.
 func parseStructuredEntities(content string) ([]ExtractedEntity, error) {
-	var wrapper struct {
-		Entities []ExtractedEntity `json:"entities"`
-	}
-	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && wrapper.Entities != nil {
-		return wrapper.Entities, nil
-	}
 	return parseExtractionResponse(content)
 }
 
 // parseExtractionResponse parses the LLM response into extracted entities.
-// This is kept as a fallback for providers that don't fully support structured output.
+// This is kept as a fallback for providers that don't fully support structured
+// output. It is robust to surrounding prose: rather than slicing from the
+// first '[' to the last ']' (which is corrupted by brackets in prose or
+// inside attribute values), it scans for balanced, string-aware JSON spans
+// and returns the first one that parses as entities.
 func parseExtractionResponse(content string) ([]ExtractedEntity, error) {
-	// Try to extract JSON from the response
 	content = strings.TrimSpace(content)
+	content = stripMarkdownFence(content)
 
-	// Handle markdown code blocks if present
-	if strings.HasPrefix(content, "```") {
-		// Find the content between code blocks
-		start := strings.Index(content, "\n")
-		end := strings.LastIndex(content, "```")
-		if start > 0 && end > start {
-			content = strings.TrimSpace(content[start:end])
-		}
+	// Fast path: the whole content is the JSON.
+	if entities, err := tryParseEntities(content); err == nil {
+		return entities, nil
 	}
 
-	// Try to find JSON array in the response
-	startIdx := strings.Index(content, "[")
-	endIdx := strings.LastIndex(content, "]")
-	if startIdx >= 0 && endIdx > startIdx {
-		content = content[startIdx : endIdx+1]
+	// Scan for a balanced JSON span embedded in prose.
+	for i := 0; i < len(content); i++ {
+		if content[i] != '[' && content[i] != '{' {
+			continue
+		}
+		end := scanBalanced(content, i)
+		if end < 0 {
+			continue
+		}
+		if entities, err := tryParseEntities(content[i:end]); err == nil {
+			return entities, nil
+		}
+		// Not the span we want (e.g. "[listed below]" in prose or an
+		// unrelated JSON value) — keep scanning.
+	}
+
+	return nil, fmt.Errorf("no valid JSON entities found in response")
+}
+
+// stripMarkdownFence removes a leading ``` / ```lang fence line and its
+// closing fence, if the content is fenced. Unlike a naive first-newline to
+// last-``` slice, it only strips at line boundaries so fences inside the
+// JSON payload are left untouched.
+func stripMarkdownFence(content string) string {
+	if !strings.HasPrefix(content, "```") {
+		return content
+	}
+	nl := strings.Index(content, "\n")
+	if nl < 0 {
+		return content
+	}
+	content = content[nl+1:]
+	if idx := strings.LastIndex(content, "\n```"); idx >= 0 {
+		content = content[:idx]
+	} else {
+		content = strings.TrimSuffix(content, "```")
+	}
+	return strings.TrimSpace(content)
+}
+
+// scanBalanced returns the exclusive end index of the JSON value opening at
+// content[start], or -1 if no balanced value completes. The scanner is
+// string-aware: brackets inside JSON string literals and escape sequences
+// are skipped, so an attribute value containing ']' cannot truncate the span.
+func scanBalanced(content string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(content); i++ {
+		c := content[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+// tryParseEntities attempts to decode s as extracted entities, accepting the
+// object-wrapped form ({"entities": [...]}), the raw array form ([...]),
+// or a single entity object ({"name": ...}).
+func tryParseEntities(s string) ([]ExtractedEntity, error) {
+	var wrapper struct {
+		Entities []ExtractedEntity `json:"entities"`
+	}
+	if err := json.Unmarshal([]byte(s), &wrapper); err == nil && wrapper.Entities != nil {
+		return wrapper.Entities, nil
 	}
 
 	var entities []ExtractedEntity
-	if err := json.Unmarshal([]byte(content), &entities); err != nil {
-		// Try parsing as a single entity
-		var single ExtractedEntity
-		if singleErr := json.Unmarshal([]byte(content), &single); singleErr == nil && single.Name != "" {
-			return []ExtractedEntity{single}, nil
-		}
-		return nil, fmt.Errorf("invalid JSON response: %w", err)
+	if err := json.Unmarshal([]byte(s), &entities); err == nil {
+		return entities, nil
 	}
 
-	return entities, nil
+	var single ExtractedEntity
+	if err := json.Unmarshal([]byte(s), &single); err == nil && single.Name != "" {
+		return []ExtractedEntity{single}, nil
+	}
+
+	return nil, fmt.Errorf("not parseable as entities")
 }
 
 // validateExtractedEntity checks if an extracted entity is valid.

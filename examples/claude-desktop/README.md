@@ -17,14 +17,14 @@ Claude Desktop supports MCP servers, allowing Claude to use Cortex's memory capa
 
 ```bash
 # macOS (Apple Silicon)
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_arm64.tar.gz
-tar -xzf cortex_0.1.0_darwin_arm64.tar.gz
-sudo mv cortex_0.1.0_darwin_arm64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_arm64.tar.gz
+tar -xzf cortex_1.0.0_darwin_arm64.tar.gz
+sudo mv cortex_1.0.0_darwin_arm64/cortex /usr/local/bin/
 
 # macOS (Intel)
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_amd64.tar.gz
-tar -xzf cortex_0.1.0_darwin_amd64.tar.gz
-sudo mv cortex_0.1.0_darwin_amd64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_amd64.tar.gz
+tar -xzf cortex_1.0.0_darwin_amd64.tar.gz
+sudo mv cortex_1.0.0_darwin_amd64/cortex /usr/local/bin/
 ```
 
 ### 2. Configure Claude Desktop
@@ -103,7 +103,7 @@ If you're running an [Iris](https://github.com/petal-labs/iris) embedding servic
 
 ## Available Tools
 
-Once configured, Claude will have access to these tools:
+Once configured, Claude will have access to all 19 Cortex tools:
 
 ### Conversation Memory
 - `conversation_append` - Save messages to memory
@@ -113,6 +113,7 @@ Once configured, Claude will have access to these tools:
 
 ### Knowledge Store
 - `knowledge_ingest` - Add documents to knowledge base
+- `knowledge_bulk_ingest` - Add multiple documents in one call
 - `knowledge_search` - Search your documents
 - `knowledge_collections` - Manage document collections
 
@@ -120,11 +121,18 @@ Once configured, Claude will have access to these tools:
 - `context_get` / `context_set` - Store and retrieve key-value data
 - `context_list` - List stored context
 - `context_merge` - Merge context with strategies
+- `context_history` - View version history for a key
 
 ### Entity Memory
 - `entity_query` - Look up entities by name
 - `entity_search` - Semantic search across entities
 - `entity_relationships` - Get entity connections
+- `entity_update` - Modify entity attributes
+- `entity_merge` - Combine duplicate entities
+- `entity_list` - List entities with filters
+
+Every tool response includes a `schema_version` field identifying the response
+contract, so tooling built on these responses can detect contract changes.
 
 ## Example Prompts
 
@@ -170,6 +178,19 @@ cortex knowledge ingest \
 2. Verify the config file syntax is valid JSON
 3. Check Claude Desktop logs for errors
 4. Restart Claude Desktop completely
+
+### Server exits immediately with "invalid config"
+
+Cortex validates `~/.cortex/config.yaml` at startup and refuses to run on bad
+values, listing every violation by config key. Claude Desktop surfaces this as
+a server that fails to connect. Run `cortex serve` in a terminal to read the
+full message:
+
+```
+invalid config:
+  - embedding.dimensions must be > 0 (got 0)
+  - server.log_level "verbose" is not supported (supported: "debug", "info", "warn", "error")
+```
 
 ### Connection errors
 

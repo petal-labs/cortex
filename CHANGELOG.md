@@ -5,6 +5,159 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-08-16
+
+First stable release. Cortex's storage, MCP wire contract, and public Go API
+are now covered by semantic versioning: breaking changes require a major bump.
+
+This release is the stability hardening described in the
+[Cortex 1.0 Stability Roadmap](https://github.com/petal-labs/cortex/issues/35) —
+all 32 items across its five phases.
+
+### Upgrading from 0.3.x
+
+- **MCP clients** must send string-valued `metadata`, filters, and attributes,
+  and correctly-typed tool arguments; both are now rejected rather than
+  coerced. Responses gained a `schema_version` field (currently `1`) and no
+  longer contain embedding vectors, `null` collections, or zero timestamps.
+- **Go API consumers** should note the `pkg/types` changes below.
+- **pgvector deployments** created before this release keep their existing
+  `vector(1536)` columns. Cortex now refuses to start if `embedding.dimensions`
+  disagrees with them — set it to `1536` (the default) unless you re-embed.
+- **No manual migration step.** Both backends apply pending versioned
+  migrations at startup.
+
+### Added
+
+- **Storage**
+  - Versioned migration runner for the pgvector backend, mirroring SQLite's.
+    Both backends record the applied version in `cortex_metadata.schema_version`
+    and apply only pending migrations at startup.
+  - Dual-backend conformance suite (`internal/storage/conformance/`) holding
+    SQLite and pgvector to the same behavioral contract. The pgvector run uses
+    testcontainers and is skipped in short mode, on Windows, and without a
+    healthy Docker provider. New `make test-integration` target and a CI job.
+  - `storage.pool_max_conns` and `storage.pool_min_conns` config options for
+    pgvector. `0` (the default) defers to the `pool_max_conns`/`pool_min_conns`
+    query params on `database_url`, then to pgx's defaults; explicit values
+    take precedence over the URL.
+
+- **Configuration**
+  - Startup validation across every config section. Bad values fail fast with
+    an error listing each violation by config key, instead of failing late and
+    opaquely at runtime (a non-positive `retention.gc_interval`, for example,
+    used to panic the background ticker).
+  - `summarization.timeout` (default `120s`) and `entity.extraction_timeout`
+    (default `120s`) explicitly bound LLM calls. `0` disables.
+  - `server.shutdown_timeout` (default `30s`) bounds the graceful drain of
+    background workers.
+
+- **MCP Server**
+  - Output DTOs with a declared, versioned response contract
+    (`internal/server/dto/`). Every top-level response now carries
+    `schema_version`, letting clients feature-detect contract changes. The wire
+    shapes are frozen by golden-file tests, decoupling them from internal
+    engine types.
+
+- **Observability**
+  - `/ready` readiness probe on the metrics port, returning `200 ready` when
+    the storage backend is reachable within 2s and `503 not ready: <reason>`
+    otherwise. `/health` remains liveness-only so a database outage pulls the
+    instance from rotation rather than getting it restarted.
+
+- **Entity Memory**
+  - `event` and `other` entity types.
+  - `next_retry_at` on `ExtractionQueueItem`, recording the earliest eligible
+    dequeue time after a failed attempt.
+
+### Changed
+
+- **BREAKING (Go API)** — `pkg/types`:
+  - `ExtractedEntity` dropped `Relationships` and gained `Confidence`;
+    `ExtractedRelationship` gained `SourceName` and always emits `Confidence`.
+    The duplicate extractor-local and package-level definitions are now a
+    single canonical pair.
+  - `CollectionStats.LastIngest` is now `*time.Time` and is omitted from JSON
+    for collections that have never been ingested into, rather than rendering
+    as the misleading `0001-01-01T00:00:00Z`.
+
+- **BREAKING (MCP wire contract)**:
+  - Metadata, filter, and attribute values must be strings. Non-string values
+    are rejected with an actionable message naming the key and its type;
+    Cortex previously stringified them silently, which corrupted typed values
+    and made filter matching ambiguous.
+  - Tool arguments that are present but of the wrong type are rejected rather
+    than silently falling back to the default, so a client bug no longer looks
+    like a working call.
+  - Entity type values outside the seven supported names are rejected instead
+    of being silently remapped to an unrelated type.
+  - Embedding vectors are stripped from search results — a large payload MCP
+    clients could not use.
+  - Empty slices and maps serialize as `[]` and `{}` instead of `null`.
+  - Zero-value timestamps are omitted from responses.
+
+- **pgvector**
+  - Schema DDL is generated from `embedding.dimensions` instead of a hardcoded
+    `vector(1536)`, so non-1536 embedding models work without patching DDL.
+    A configured dimension that disagrees with existing columns is a startup
+    error naming the required `ALTER TABLE`, not a silent write of ragged data.
+  - Vector types are registered in the `pgxpool` `AfterConnect` hook, which was
+    previously a no-op.
+  - Unique-constraint violations are detected via `pgconn.PgError` codes rather
+    than substring matching on the error text.
+
+- **Embeddings**
+  - Transient provider failures (5xx, network, 429) are retried with
+    exponential backoff and jitter; permanent failures (bad key, malformed
+    request, undecodable response) are not retried.
+  - Provider errors are classified through Iris's typed error taxonomy
+    (`core.ProviderError` + sentinels) rather than message text, and logged
+    with status, provider error code, and request ID for escalation.
+  - Oversized `EmbedBatch` inputs are split to fit the provider's limit instead
+    of failing the whole call.
+  - Response vector lengths are validated against `embedding.dimensions`,
+    catching a mismatched model before bad data reaches storage.
+  - `EmbedBatch` maps vectors by their response `Index` rather than by position
+    in the response array.
+
+- **Entity Extraction**
+  - The extraction JSON schema uses an object root with `Strict` enabled;
+    an array root is not valid for structured output.
+  - Fallback JSON parsing (for providers without structured output) is
+    hardened against fenced blocks and surrounding prose.
+  - The queue enforces `extraction_backoff` between attempts and routes
+    non-retryable errors to the dead-letter policy instead of spinning on them.
+
+- **MCP Server**
+  - Errors are classified before reaching the client: known client-facing
+    sentinels return their own message, everything else returns
+    `internal server error` and is logged server-side, so SQL fragments and
+    connection URLs no longer leak to clients.
+  - Large integers keep their precision through the JSON argument path;
+    a value that float64 decoding would corrupt is rejected.
+
+### Fixed
+
+- **Knowledge**
+  - Ingestion no longer swallows embedding failures. A document whose
+    embeddings fail now returns an error instead of being persisted without
+    vectors — permanently invisible to semantic search.
+
+- **Reliability**
+  - Panic recovery for MCP tool and resource handlers, the entity extraction
+    queue, and the garbage collector. A panic in one batch is logged with its
+    stack and the worker continues, instead of taking down the process.
+  - Bounded, coordinated shutdown: on signal, the queue processor and garbage
+    collector are drained within `server.shutdown_timeout` before exit.
+
+- **Embeddings**
+  - An all-empty batch with `embedding.dimensions` unset is rejected instead of
+    synthesizing zero-width vectors that produced ragged output downstream.
+
+### Removed
+
+- Dead embedding contract types that no code path referenced.
+
 ## [0.3.0] - 2026-07-31
 
 ### Changed
@@ -124,6 +277,7 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
+[1.0.0]: https://github.com/petal-labs/cortex/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/petal-labs/cortex/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/petal-labs/cortex/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/petal-labs/cortex/compare/v0.1.1...v0.2.0

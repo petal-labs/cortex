@@ -19,7 +19,12 @@ Before running these examples, ensure Cortex is installed:
 
 ```bash
 # Download from releases
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+[ "$ARCH" = "x86_64" ] && ARCH=amd64
+[ "$ARCH" = "aarch64" ] && ARCH=arm64
+
+curl -LO "https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_${OS}_${ARCH}.tar.gz"
 tar -xzf cortex_*.tar.gz
 sudo mv cortex_*/cortex /usr/local/bin/
 

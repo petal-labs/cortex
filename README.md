@@ -48,38 +48,38 @@ Download the latest release for your platform from [GitHub Releases](https://git
 **Linux (amd64):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_linux_amd64.tar.gz
-tar -xzf cortex_0.1.0_linux_amd64.tar.gz
-sudo mv cortex_0.1.0_linux_amd64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_linux_amd64.tar.gz
+tar -xzf cortex_1.0.0_linux_amd64.tar.gz
+sudo mv cortex_1.0.0_linux_amd64/cortex /usr/local/bin/
 ```
 
 **Linux (arm64):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_linux_arm64.tar.gz
-tar -xzf cortex_0.1.0_linux_arm64.tar.gz
-sudo mv cortex_0.1.0_linux_arm64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_linux_arm64.tar.gz
+tar -xzf cortex_1.0.0_linux_arm64.tar.gz
+sudo mv cortex_1.0.0_linux_arm64/cortex /usr/local/bin/
 ```
 
 **macOS (Apple Silicon):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_arm64.tar.gz
-tar -xzf cortex_0.1.0_darwin_arm64.tar.gz
-sudo mv cortex_0.1.0_darwin_arm64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_arm64.tar.gz
+tar -xzf cortex_1.0.0_darwin_arm64.tar.gz
+sudo mv cortex_1.0.0_darwin_arm64/cortex /usr/local/bin/
 ```
 
 **macOS (Intel):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_amd64.tar.gz
-tar -xzf cortex_0.1.0_darwin_amd64.tar.gz
-sudo mv cortex_0.1.0_darwin_amd64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_amd64.tar.gz
+tar -xzf cortex_1.0.0_darwin_amd64.tar.gz
+sudo mv cortex_1.0.0_darwin_amd64/cortex /usr/local/bin/
 ```
 
 **Windows:**
 
-Download `cortex_0.1.0_windows_amd64.zip` from [releases](https://github.com/petal-labs/cortex/releases/latest), extract, and add to your PATH.
+Download `cortex_1.0.0_windows_amd64.zip` from [releases](https://github.com/petal-labs/cortex/releases/latest), extract, and add to your PATH.
 
 ### Build from Source
 
@@ -150,10 +150,12 @@ embedding:
   model: text-embedding-3-small
   dimensions: 1536
   cache_size: 10000
+  timeout: 120s  # 0 disables the timeout
 
 summarization:
   provider: anthropic  # anthropic, openai, gemini, ollama
   model: claude-sonnet-4-6
+  timeout: 120s  # 0 disables the timeout
 
 conversation:
   auto_summarize_threshold: 50
@@ -166,12 +168,48 @@ knowledge:
 
 entity:
   extraction_mode: full  # off, sampled, whitelist, full
+  extraction_max_attempts: 5
+  extraction_backoff: exponential  # fixed, exponential
+  extraction_dead_letter_policy: retain  # retain, drop
+  extraction_timeout: 120s  # 0 disables the timeout
 
 server:
   metrics_enabled: true
   metrics_port: 9811
   structured_logging: true
+  shutdown_timeout: 30s
 ```
+
+### Config Validation
+
+Cortex validates the configuration at startup and refuses to start on bad
+values, reporting every violation at once with its config key:
+
+```
+invalid config:
+  - storage.database_url is required when storage.backend is "pgvector"
+  - embedding.dimensions must be > 0 (got 0)
+  - entity.extraction_backoff "linear" is not supported (supported: "fixed", "exponential")
+```
+
+This replaces late, opaque runtime failures — a non-positive
+`retention.gc_interval`, for example, used to panic the background ticker
+after startup.
+
+### Timeouts
+
+Provider calls are bounded so a hung upstream fails fast instead of blocking
+indefinitely:
+
+| Option | Default | Bounds |
+|--------|---------|--------|
+| `embedding.timeout` | `120s` | Embedding provider calls |
+| `summarization.timeout` | `120s` | Conversation summarization calls |
+| `entity.extraction_timeout` | `120s` | Entity extraction calls |
+| `server.shutdown_timeout` | `30s` | Graceful drain of background workers |
+
+Setting any of the provider timeouts to `0` disables it (unbounded). A timeout
+is only applied when the caller supplied no deadline of its own.
 
 ### PostgreSQL Setup
 
@@ -181,6 +219,12 @@ For production deployments:
 storage:
   backend: pgvector
   database_url: postgres://user:pass@localhost:5432/cortex
+
+  # Optional explicit pool sizing. 0 (the default) defers to the
+  # pool_max_conns/pool_min_conns query params on database_url, then to
+  # pgx's built-in defaults. Explicit values take precedence over the URL.
+  pool_max_conns: 0
+  pool_min_conns: 0
 ```
 
 Ensure pgvector extension is installed:
@@ -189,9 +233,28 @@ Ensure pgvector extension is installed:
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
+**Embedding dimensions.** The pgvector schema is generated from
+`embedding.dimensions`, so a non-1536 model works without patching DDL. The
+dimension is baked into the `vector(N)` columns when the schema is first
+created. If you later change `embedding.dimensions` against an existing
+database, Cortex fails at startup rather than writing ragged vectors:
+
+```
+existing embedding columns are vector(1536) but embedding.dimensions is 768;
+run an ALTER TABLE ... ALTER COLUMN embedding TYPE vector(768) migration
+or start with a fresh database
+```
+
+Changing dimensions requires re-embedding your data — the stored vectors are
+not convertible.
+
+**Migrations.** Both backends run versioned migrations at startup and record
+the applied version in `cortex_metadata.schema_version`. Upgrades apply only
+the pending migrations; no manual DDL step is needed.
+
 ## MCP Tools
 
-Cortex exposes 16 MCP tools across the four memory primitives:
+Cortex exposes 19 MCP tools across the four memory primitives:
 
 ### Conversation
 
@@ -231,6 +294,74 @@ Cortex exposes 16 MCP tools across the four memory primitives:
 | `entity_update` | Modify entity attributes |
 | `entity_merge` | Combine duplicate entities |
 | `entity_list` | List entities with filters |
+
+Entity types are `person`, `organization`, `product`, `location`, `concept`,
+`event`, and `other`. Any other value is rejected — an unrecognized type used
+to be silently remapped to an unrelated one.
+
+### Response Contract
+
+Every tool response is a declared, versioned JSON shape. Each top-level
+response carries `schema_version`, so clients can feature-detect contract
+changes instead of guessing:
+
+```json
+{
+  "schema_version": 1,
+  "results": [
+    {
+      "chunk": {
+        "id": "chunk-1",
+        "document_id": "doc-1",
+        "namespace": "ns",
+        "collection_id": "col-1",
+        "content": "chunk content",
+        "index": 0,
+        "token_count": 2
+      },
+      "score": 0.91,
+      "rank": 1,
+      "document_title": "Doc",
+      "source": "test://src"
+    }
+  ],
+  "query": "chunk",
+  "total_found": 1
+}
+```
+
+The contract guarantees:
+
+- **`schema_version`** is bumped only on a breaking change to a response shape.
+- **Empty collections serialize as `[]` and `{}`**, never `null`, so clients can
+  iterate without a nil check.
+- **Embedding vectors are stripped from search results.** They were a large,
+  unusable payload for MCP clients; use the Go API if you need raw vectors.
+- **Zero-value timestamps are omitted** rather than rendered as the misleading
+  `0001-01-01T00:00:00Z`.
+
+### Argument Handling
+
+Tool arguments are validated rather than silently defaulted:
+
+- An argument that is **present but of the wrong type** is rejected with a
+  message naming the parameter and the type it got — e.g.
+  `parameter "limit" must be a number, got string`. Previously a wrong-typed
+  argument fell back to the default, so a client bug looked like a working call.
+- **Metadata, filters, and attributes are string-valued.** Non-string values are
+  rejected with an actionable message —
+  `parameter "metadata" values must be strings; key "count" has a number value (send "3" as a string)`.
+  Cortex used to stringify them silently, which made filter matching ambiguous.
+- **Large integers keep their precision** through the JSON argument path;
+  a value that would be corrupted by float64 decoding is rejected instead.
+
+### Errors
+
+Tool errors are classified before they reach the client. Known client-facing
+conditions (not found, invalid input, version conflict, batch too large) return
+their own message. Anything else returns `internal server error` and is logged
+server-side with full detail, so SQL fragments, connection URLs, and other
+internals never leak to MCP clients.
 
 ## Architecture
 
@@ -379,25 +510,101 @@ When `metrics_enabled: true`, Cortex exposes metrics at `:9811/metrics`:
 - `cortex_embedding_requests_total` — Embedding API calls
 - `cortex_extraction_queue_size` — Entity extraction queue depth
 
-### Health Check
+### Health and Readiness
+
+Cortex exposes two distinct probes on the metrics port. They answer different
+questions, and conflating them gets healthy pods killed during a database blip:
+
+| Endpoint | Question | Checks | Status |
+|----------|----------|--------|--------|
+| `/health` | Is the process alive? | Nothing — only that the HTTP server accepts connections | Always `200 ok` |
+| `/ready` | Can it serve traffic? | Storage backend reachability, bounded at 2s | `200 ready` / `503 not ready: <reason>` |
 
 ```bash
-curl http://localhost:9811/health
+curl http://localhost:9811/health   # liveness
+curl http://localhost:9811/ready    # readiness
 ```
+
+Wire `/health` to your orchestrator's liveness probe and `/ready` to its
+readiness probe. A dead database should pull the instance out of rotation
+(`/ready` fails), not restart it (`/health` still passes).
+
+```yaml
+# Kubernetes
+livenessProbe:
+  httpGet: { path: /health, port: 9811 }
+readinessProbe:
+  httpGet: { path: /ready, port: 9811 }
+```
+
+## Reliability
+
+The server is built to fail loudly and recover cleanly rather than degrade
+silently:
+
+- **Failures propagate.** Embedding failures during knowledge ingestion return
+  an error instead of persisting a document with no vectors — which used to
+  leave content permanently invisible to semantic search.
+- **Panic recovery.** MCP tool and resource handlers recover through the
+  server's recovery middleware; the entity extraction queue and the garbage
+  collector recover in their own loops, log the panic with its stack, and keep
+  running. A nil-map access in one batch no longer takes down the process.
+- **Retries with backoff.** Transient embedding-provider failures (5xx,
+  network, 429) are retried up to 3 times with exponential backoff and jitter;
+  permanent failures (bad API key, malformed request, undecodable response)
+  are not retried at all. Classification comes from Iris's typed error
+  taxonomy, not string matching, and failures are logged with the provider's
+  status, error code, and request ID for escalation.
+- **Auto-batching.** Oversized `EmbedBatch` inputs are split to fit the
+  provider's limit instead of failing the whole call.
+- **Response validation.** Returned vectors are checked against
+  `embedding.dimensions`, catching a mismatched model before bad data lands in
+  storage.
+- **Queue backoff.** The entity extraction queue honors
+  `extraction_backoff` between attempts and drops non-retryable work to the
+  dead-letter policy instead of spinning on it.
+- **Bounded shutdown.** On signal, the queue processor and garbage collector
+  are drained within `server.shutdown_timeout` before the process exits.
 
 ## Development
 
 ### Run Tests
 
 ```bash
-go test ./...
+make test              # full suite
+make test-short        # skips container-backed integration tests
+make test-cover        # with coverage
+make test-integration  # dual-backend conformance suite (requires Docker)
 ```
+
+Both storage backends are held to the same behavioral contract by a shared
+conformance suite in `internal/storage/conformance/`. The SQLite run is
+in-process; the pgvector run spins up Postgres + pgvector via testcontainers
+and is skipped automatically in short mode, on Windows, or when no healthy
+Docker provider is available.
 
 ### Build
 
 ```bash
 go build -o cortex ./cmd/cortex
 ```
+
+## Versioning
+
+Cortex follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). As
+of 1.0.0, three surfaces are covered by that guarantee:
+
+| Surface | Contract |
+|---------|----------|
+| MCP tool arguments and responses | `schema_version` identifies the response contract; a breaking shape change bumps it and the major version |
+| `pkg/types` | Exported types are stable within a major version |
+| Storage schema | Versioned migrations apply forward automatically; no manual DDL |
+
+The `internal/` packages are explicitly not covered — they may change in any
+release. Use the MCP interface or `pkg/types` for anything you need to hold
+stable.
+
+See [CHANGELOG.md](./CHANGELOG.md) for the upgrade notes from 0.3.x.
 
 ## License
 

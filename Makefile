@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt vet sec clean install run tui help
+.PHONY: all build test test-integration test-cover test-short lint fmt vet sec clean install run tui help
 
 # Build variables
 BINARY_NAME := cortex
@@ -42,6 +42,9 @@ test-cover: ## Run tests with coverage
 
 test-short: ## Run tests (short mode)
 	go test -v -short ./...
+
+test-integration: ## Run integration tests (requires Docker for pgvector conformance)
+	go test -v -race -run Conformance ./internal/storage/...
 
 ## Lint & Format
 

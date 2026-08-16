@@ -783,19 +783,3 @@ func TestCompleteExtractionDeadLetter(t *testing.T) {
 		t.Errorf("expected 1 dead letter, got %d", stats.DeadLetterCount)
 	}
 }
-
-func TestSearchEntitiesPlaceholder(t *testing.T) {
-	backend := newTestBackendWithDB(t)
-	defer backend.Close()
-
-	ctx := context.Background()
-
-	// SearchEntities is a placeholder until vec0 integration
-	results, err := backend.SearchEntities(ctx, "test-ns", []float32{0.1, 0.2}, storage.EntitySearchOpts{})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("expected empty results, got %d", len(results))
-	}
-}

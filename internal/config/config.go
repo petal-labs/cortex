@@ -221,6 +221,12 @@ func Load(configPath string) (*Config, error) {
 		return nil, err
 	}
 
+	// Fail fast on bad values with actionable messages rather than late,
+	// opaque failures (or ticker panics) at runtime.
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -266,4 +272,5 @@ func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("server.metrics_port", cfg.Server.MetricsPort)
 	v.SetDefault("server.structured_logging", cfg.Server.StructuredLogging)
 	v.SetDefault("server.request_id_header", cfg.Server.RequestIDHeader)
+	v.SetDefault("server.shutdown_timeout", cfg.Server.ShutdownTimeout)
 }

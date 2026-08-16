@@ -88,15 +88,19 @@ tools: ## Install development tools
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install github.com/securego/gosec/v2/cmd/gosec@latest
-	go install github.com/goreleaser/goreleaser/v2@latest
 
 ## Release
-
-release-dry: ## Dry run release
-	goreleaser release --snapshot --clean
-
-release: ## Create a release (requires GITHUB_TOKEN)
-	goreleaser release --clean
+#
+# Releases are cut entirely by CI: pushing a v* tag triggers
+# .github/workflows/release.yml, which cross-compiles every platform with
+# CGO, assembles the archives as cortex_<version>_<os>_<arch>, and publishes
+# the GitHub release. A tag containing a hyphen (v1.0.0-rc1) is marked as a
+# prerelease.
+#
+#   git tag -a v1.2.3 -m "Cortex 1.2.3" && git push origin v1.2.3
+#
+# There is no local release target: building the release artifacts requires
+# the cross-compilation toolchains installed on the CI runners.
 
 ## Help
 

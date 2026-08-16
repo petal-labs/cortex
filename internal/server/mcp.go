@@ -57,6 +57,7 @@ func New(
 		cfg.Version,
 		server.WithToolCapabilities(false),
 		server.WithRecovery(),
+		server.WithResourceRecovery(),
 	)
 
 	// Register all tools

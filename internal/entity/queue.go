@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -104,7 +105,14 @@ func (q *QueueProcessor) run(ctx context.Context) {
 		case <-q.stopChan:
 			return
 		case <-ticker.C:
-			q.processBatch(ctx)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("panic recovered in extraction queue processor: %v\n%s", r, debug.Stack())
+					}
+				}()
+				q.processBatch(ctx)
+			}()
 		}
 	}
 }

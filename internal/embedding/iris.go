@@ -155,6 +155,24 @@ retryLoop:
 		return nil, fmt.Errorf("%w: expected %d embeddings, got %d", ErrProviderFailed, len(nonEmpty), len(resp.Vectors))
 	}
 
+	// Validate per-vector dimensions against the configured value. A
+	// wrong-model response (e.g. 768-dim vectors against a 1536-dim schema)
+	// would otherwise surface as an opaque downstream insert failure or
+	// silent index corruption.
+	for i, v := range resp.Vectors {
+		if c.dimensions > 0 {
+			if len(v.Vector) != c.dimensions {
+				return nil, fmt.Errorf("%w: embedding %d has %d dimensions, expected %d (check embedding model and dimensions config)",
+					ErrProviderFailed, i, len(v.Vector), c.dimensions)
+			}
+		} else if len(v.Vector) != len(resp.Vectors[0].Vector) {
+			// dimensions unset: infer from the first vector, but reject
+			// inconsistent lengths so we never return ragged output.
+			return nil, fmt.Errorf("%w: inconsistent embedding dimensions: vector %d has %d dimensions, vector 0 has %d",
+				ErrProviderFailed, i, len(v.Vector), len(resp.Vectors[0].Vector))
+		}
+	}
+
 	// Map embeddings back to original indices, filling empty inputs with zero vectors
 	result := make([][]float32, len(texts))
 	dims := c.dimensions

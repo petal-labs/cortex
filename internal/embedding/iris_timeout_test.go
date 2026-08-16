@@ -3,6 +3,7 @@ package embedding
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,5 +195,84 @@ func TestIrisClientEmbedRetrySkipsNonRetryable(t *testing.T) {
 	}
 	if fake.attempts != 1 {
 		t.Errorf("expected 1 attempt (no retry for 400), got %d", fake.attempts)
+	}
+}
+
+// variableVectorProvider returns vectors with per-input lengths drawn from
+// the lengths slice (cycled), simulating wrong-model or inconsistent
+// embedding responses.
+type variableVectorProvider struct {
+	lengths []int
+}
+
+func (v *variableVectorProvider) CreateEmbeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	vectors := make([]core.EmbeddingVector, len(req.Input))
+	for i := range vectors {
+		l := v.lengths[i%len(v.lengths)]
+		vec := make([]float32, l)
+		for j := range vec {
+			vec[j] = float32(j) * 0.01
+		}
+		vectors[i] = core.EmbeddingVector{Index: i, Vector: vec}
+	}
+	return &core.EmbeddingResponse{Vectors: vectors}, nil
+}
+
+// TestIrisClientEmbedDimensionMismatch verifies that a wrong-model response
+// (e.g. 768-dim vectors against a 1536-dim config) fails with a clear error
+// instead of passing wrong-width vectors downstream.
+func TestIrisClientEmbedDimensionMismatch(t *testing.T) {
+	fake := &variableVectorProvider{lengths: []int{2}}
+	c := &IrisClient{provider: fake, dimensions: 4, batchSize: 10}
+
+	_, err := c.Embed(context.Background(), "hello")
+	if err == nil {
+		t.Fatal("expected dimension mismatch error, got nil")
+	}
+	if !errors.Is(err, ErrProviderFailed) {
+		t.Errorf("expected ErrProviderFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "has 2 dimensions, expected 4") {
+		t.Errorf("expected clear dimension message, got: %v", err)
+	}
+}
+
+// TestIrisClientEmbedInconsistentDimensions verifies that when dimensions
+// are unset, ragged vector output is rejected rather than silently inferred
+// from the first vector.
+func TestIrisClientEmbedInconsistentDimensions(t *testing.T) {
+	fake := &variableVectorProvider{lengths: []int{3, 2}}
+	c := &IrisClient{provider: fake, dimensions: 0, batchSize: 10}
+
+	_, err := c.EmbedBatch(context.Background(), []string{"one", "two"})
+	if err == nil {
+		t.Fatal("expected inconsistent dimensions error, got nil")
+	}
+	if !errors.Is(err, ErrProviderFailed) {
+		t.Errorf("expected ErrProviderFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "inconsistent embedding dimensions") {
+		t.Errorf("expected inconsistency message, got: %v", err)
+	}
+}
+
+// TestIrisClientEmbedConsistentUnsetDimensions verifies that when dimensions
+// are unset, a consistent response is accepted and dims are inferred from
+// the first vector.
+func TestIrisClientEmbedConsistentUnsetDimensions(t *testing.T) {
+	fake := &variableVectorProvider{lengths: []int{3}}
+	c := &IrisClient{provider: fake, dimensions: 0, batchSize: 10}
+
+	embs, err := c.EmbedBatch(context.Background(), []string{"one", "two"})
+	if err != nil {
+		t.Fatalf("expected success with consistent vectors, got: %v", err)
+	}
+	if len(embs) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(embs))
+	}
+	for i, e := range embs {
+		if len(e) != 3 {
+			t.Errorf("expected embedding %d to have 3 dimensions, got %d", i, len(e))
+		}
 	}
 }

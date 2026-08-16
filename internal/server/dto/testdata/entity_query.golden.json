@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "entity": {
+    "id": "ent-1",
+    "namespace": "ns",
+    "name": "Acme",
+    "type": "organization",
+    "aliases": [
+      "ACME"
+    ],
+    "summary": "a corp",
+    "attributes": {
+      "industry": "tech"
+    },
+    "mention_count": 3,
+    "first_seen_at": "2026-01-02T03:04:05Z",
+    "last_seen_at": "2026-06-07T08:09:10Z"
+  },
+  "relationships": [
+    {
+      "id": "rel-1",
+      "namespace": "ns",
+      "source_entity_id": "ent-1",
+      "target_entity_id": "ent-2",
+      "relation_type": "competes_with",
+      "description": "",
+      "confidence": 0.8,
+      "mention_count": 1,
+      "first_seen_at": "2026-01-02T03:04:05Z",
+      "last_seen_at": "2026-06-07T08:09:10Z"
+    }
+  ],
+  "mentions": [
+    {
+      "id": "m-1",
+      "entity_id": "ent-1",
+      "namespace": "ns",
+      "source_type": "conversation",
+      "source_id": "msg-1",
+      "context": "Acme said",
+      "snippet": "Acme",
+      "created_at": "2026-01-02T03:04:05Z"
+    }
+  ],
+  "found": true
+}

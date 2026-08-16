@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "col-1",
+  "namespace": "ns",
+  "name": "docs",
+  "chunk_config": {
+    "strategy": "sentence",
+    "max_tokens": 512,
+    "overlap": 50
+  },
+  "created_at": "2026-01-02T03:04:05Z"
+}

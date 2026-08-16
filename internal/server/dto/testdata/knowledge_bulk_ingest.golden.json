@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "collection_id": "col-1",
+  "total_documents": 2,
+  "succeeded": 1,
+  "failed": 1,
+  "total_chunks": 3,
+  "documents": [
+    {
+      "index": 0,
+      "document_id": "doc-1",
+      "title": "ok",
+      "chunks_created": 3,
+      "success": true
+    },
+    {
+      "index": 1,
+      "title": "bad",
+      "chunks_created": 0,
+      "success": false,
+      "error": "empty content"
+    }
+  ]
+}

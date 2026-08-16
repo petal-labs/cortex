@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "key": "theme",
+  "value": {
+    "color": "dark"
+  },
+  "version": 2,
+  "updated_at": "2026-01-02T03:04:05Z",
+  "exists": true
+}

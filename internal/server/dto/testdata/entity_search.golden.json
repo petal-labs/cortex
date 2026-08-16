@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "results": [
+    {
+      "entity": {
+        "id": "ent-1",
+        "namespace": "ns",
+        "name": "Acme",
+        "type": "organization",
+        "aliases": [
+          "ACME"
+        ],
+        "summary": "a corp",
+        "attributes": {
+          "industry": "tech"
+        },
+        "mention_count": 3,
+        "first_seen_at": "2026-01-02T03:04:05Z",
+        "last_seen_at": "2026-06-07T08:09:10Z"
+      },
+      "score": 0.9,
+      "rank": 1
+    }
+  ],
+  "query": "acme",
+  "total_found": 1
+}

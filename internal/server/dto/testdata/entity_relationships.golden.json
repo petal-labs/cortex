@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "relationships": [
+    {
+      "id": "rel-1",
+      "namespace": "ns",
+      "source_entity_id": "ent-1",
+      "target_entity_id": "ent-2",
+      "relation_type": "competes_with",
+      "description": "rivals",
+      "confidence": 0.8,
+      "mention_count": 2,
+      "first_seen_at": "2026-01-02T03:04:05Z",
+      "last_seen_at": "2026-06-07T08:09:10Z"
+    }
+  ]
+}

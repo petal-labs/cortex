@@ -1282,3 +1282,50 @@ func TestContextSetRoundTripsExactIntegers(t *testing.T) {
 		t.Errorf("round trip corrupted values: got %+v", resp.Value)
 	}
 }
+
+// TestStructuredContentEmitted verifies tool responses carry both the JSON
+// text fallback (backward compatible) and machine-checkable structured
+// content matching the declared output schema shape.
+func TestStructuredContentEmitted(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	result, err := srv.handleConversationAppend(ctx, makeToolRequest("conversation_append", map[string]any{
+		"namespace": "test-ns",
+		"thread_id": "thread-1",
+		"role":      "user",
+		"content":   "hello",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(result))
+	}
+
+	if result.StructuredContent == nil {
+		t.Fatal("expected structuredContent on tool result")
+	}
+	structuredJSON, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("failed to marshal structuredContent: %v", err)
+	}
+	var probe struct {
+		SchemaVersion int    `json:"schema_version"`
+		ThreadID      string `json:"thread_id"`
+	}
+	if err := json.Unmarshal(structuredJSON, &probe); err != nil {
+		t.Fatalf("structuredContent not an object: %v", err)
+	}
+	if probe.SchemaVersion != 1 || probe.ThreadID != "thread-1" {
+		t.Errorf("structuredContent mismatch: %+v", probe)
+	}
+
+	// The text fallback must carry the same payload shape.
+	if err := json.Unmarshal([]byte(getTextContent(result)), &probe); err != nil {
+		t.Fatalf("text fallback not valid JSON: %v", err)
+	}
+	if probe.SchemaVersion != 1 || probe.ThreadID != "thread-1" {
+		t.Errorf("text fallback mismatch: %+v", probe)
+	}
+}

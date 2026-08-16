@@ -154,19 +154,25 @@ type ExtractionQueueItem struct {
 	NextRetryAt *time.Time `json:"next_retry_at,omitempty"` // Earliest eligible dequeue time after a failed attempt
 }
 
-// ExtractedEntity represents an entity extracted by the LLM.
+// ExtractedEntity represents an entity extracted from text by the LLM.
+// This is the canonical extracted-entity shape: it matches the extraction
+// structured-output schema (name, type, aliases, attributes, confidence)
+// and is used by the extractor, resolver, and queue processor.
 type ExtractedEntity struct {
-	Name          string                  `json:"name"`
-	Type          EntityType              `json:"type"`
-	Aliases       []string                `json:"aliases,omitempty"`
-	Attributes    map[string]string       `json:"attributes,omitempty"`
-	Relationships []ExtractedRelationship `json:"relationships,omitempty"`
+	Name       string            `json:"name"`
+	Type       EntityType        `json:"type"`
+	Aliases    []string          `json:"aliases,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Confidence float64           `json:"confidence"`
 }
 
-// ExtractedRelationship represents a relationship extracted by the LLM.
+// ExtractedRelationship represents a relationship between extracted
+// entities. SourceName/TargetName are entity names resolved after
+// extraction.
 type ExtractedRelationship struct {
+	SourceName   string  `json:"source_name"`
 	TargetName   string  `json:"target_name"`
 	RelationType string  `json:"relation_type"`
 	Description  string  `json:"description,omitempty"`
-	Confidence   float64 `json:"confidence,omitempty"`
+	Confidence   float64 `json:"confidence"`
 }

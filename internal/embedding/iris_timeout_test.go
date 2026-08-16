@@ -546,3 +546,65 @@ func TestIrisClientEmbedBatchNoLimit(t *testing.T) {
 		t.Errorf("expected 1 provider call with no batch limit, got %d", len(fake.calls))
 	}
 }
+
+// TestIrisClientEmptyBatchRequiresDimensions verifies the all-empty-batch
+// edge case: with dimensions unset there is no provider response to infer
+// width from, so the client rejects instead of returning zero-LENGTH
+// vectors that would surface as ragred output downstream.
+func TestIrisClientEmptyBatchRequiresDimensions(t *testing.T) {
+	fake := &fakeEmbeddingProvider{block: false} // never called for all-empty input
+	c := &IrisClient{provider: fake, dimensions: 0, batchSize: 10}
+
+	_, err := c.EmbedBatch(context.Background(), []string{"", ""})
+	if err == nil {
+		t.Fatal("expected error for all-empty batch with unset dimensions, got nil")
+	}
+	if !errors.Is(err, ErrProviderFailed) {
+		t.Errorf("expected ErrProviderFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "embedding dimensions are unset") {
+		t.Errorf("expected actionable message, got: %v", err)
+	}
+}
+
+// TestIrisClientEmptyBatchConfiguredDimensions verifies an all-empty batch
+// with configured dimensions returns zero vectors of exactly that width.
+func TestIrisClientEmptyBatchConfiguredDimensions(t *testing.T) {
+	fake := &fakeEmbeddingProvider{block: false}
+	c := &IrisClient{provider: fake, dimensions: 384, batchSize: 10}
+
+	embs, err := c.EmbedBatch(context.Background(), []string{"", ""})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(embs) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(embs))
+	}
+	for i, e := range embs {
+		if len(e) != 384 {
+			t.Errorf("expected embedding %d to have width 384, got %d", i, len(e))
+		}
+	}
+}
+
+// TestIrisClientMixedBatchInferredDimensions verifies the mixed batch with
+// unset dimensions still infers width from the provider response for the
+// empty positions (the legitimate inference path this guard must not break).
+func TestIrisClientMixedBatchInferredDimensions(t *testing.T) {
+	fake := &variableVectorProvider{lengths: []int{3}}
+	c := &IrisClient{provider: fake, dimensions: 0, batchSize: 10}
+
+	embs, err := c.EmbedBatch(context.Background(), []string{"real", ""})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(embs) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(embs))
+	}
+	if len(embs[0]) != 3 {
+		t.Errorf("expected real input to carry 3-dim vector, got %d", len(embs[0]))
+	}
+	if len(embs[1]) != 3 {
+		t.Errorf("expected empty input zero vector to match inferred width 3, got %d", len(embs[1]))
+	}
+}

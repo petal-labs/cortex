@@ -61,6 +61,11 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userMessage string)
 
 	resp, err := builder.GetResponse(ctx)
 	if err != nil {
+		// Surface the typed classification (kind, status, code,
+		// request_id) for alerting — e.g. a 401 means stop and fix
+		// configuration, a 429 means back off. Retry itself is handled
+		// inside iris's core.Client.
+		llm.LogProviderError(ctx, "summarization", err)
 		return "", fmt.Errorf("completion request failed: %w", err)
 	}
 

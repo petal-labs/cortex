@@ -177,7 +177,11 @@ retryLoop:
 	if err != nil {
 		// Wrap both sentinels so callers can distinguish a timeout
 		// (errors.Is(err, context.DeadlineExceeded)) from other provider
-		// failures while still matching ErrProviderFailed.
+		// failures while still matching ErrProviderFailed. Surface the
+		// typed classification (kind, status, code, request_id) for
+		// alerting — e.g. a 401 means stop and fix configuration, a 429
+		// means back off.
+		llm.LogProviderError(ctx, "embedding", err)
 		return nil, fmt.Errorf("%w: %w", ErrProviderFailed, err)
 	}
 

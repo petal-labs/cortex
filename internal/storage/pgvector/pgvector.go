@@ -2,9 +2,11 @@ package pgvector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
@@ -98,24 +100,16 @@ func toVector(embedding []float32) pgvector.Vector {
 }
 
 // isUniqueConstraintError checks if the error is a unique constraint violation.
+// It inspects the typed *pgconn.PgError rather than matching error text, so it
+// is unaffected by localized or reworded driver messages.
 func isUniqueConstraintError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// PostgreSQL unique constraint violation code is 23505
-	errStr := err.Error()
-	return contains(errStr, "23505") || contains(errStr, "unique constraint") || contains(errStr, "duplicate key")
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsHelper(s, substr)
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		// PostgreSQL unique constraint violation code is 23505.
+		return pgErr.Code == "23505"
 	}
 	return false
 }

@@ -53,6 +53,10 @@ func (c *Config) Validate() error {
 		problems = append(problems, fmt.Sprintf(
 			"summarization.max_tokens must be >= 0 (got %d)", c.Summarization.MaxTokens))
 	}
+	if c.Summarization.Timeout < 0 {
+		problems = append(problems, fmt.Sprintf(
+			"summarization.timeout must be >= 0, 0 disables the timeout (got %s)", c.Summarization.Timeout))
+	}
 
 	// Conversation
 	if c.Conversation.AutoSummarizeThreshold < 0 {
@@ -149,6 +153,10 @@ func (c *Config) Validate() error {
 		problems = append(problems, fmt.Sprintf(
 			`entity.extraction_dead_letter_policy %q is not supported (supported: "retain", "drop")`,
 			c.Entity.ExtractionDeadLetterPolicy))
+	}
+	if c.Entity.ExtractionTimeout < 0 {
+		problems = append(problems, fmt.Sprintf(
+			"entity.extraction_timeout must be >= 0, 0 disables the timeout (got %s)", c.Entity.ExtractionTimeout))
 	}
 
 	// Retention — time.NewTicker panics on non-positive intervals.

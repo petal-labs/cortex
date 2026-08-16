@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/petal-labs/iris/core"
 
@@ -27,6 +28,7 @@ type Client struct {
 	client    *core.Client
 	model     core.ModelID
 	maxTokens int
+	timeout   time.Duration
 }
 
 // NewClient creates a new summarization client using the iris SDK.
@@ -46,6 +48,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		client:    client,
 		model:     core.ModelID(cfg.Summarization.Model),
 		maxTokens: cfg.Summarization.MaxTokens,
+		timeout:   cfg.Summarization.Timeout,
 	}, nil
 }
 
@@ -57,6 +60,13 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userMessage string)
 
 	if c.maxTokens > 0 {
 		builder = builder.MaxTokens(c.maxTokens)
+	}
+
+	// Explicit timeout opt-in (config summarization.timeout). Without it the
+	// call inherits the SDK's implicit default silently; the builder only
+	// applies it when the caller supplied no deadline of its own.
+	if c.timeout > 0 {
+		builder = builder.Timeout(c.timeout)
 	}
 
 	resp, err := builder.GetResponse(ctx)

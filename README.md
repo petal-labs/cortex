@@ -48,38 +48,38 @@ Download the latest release for your platform from [GitHub Releases](https://git
 **Linux (amd64):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_linux_amd64.tar.gz
-tar -xzf cortex_1.0.0_linux_amd64.tar.gz
-sudo mv cortex_1.0.0_linux_amd64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_linux_amd64.tar.gz
+tar -xzf cortex_1.0.1_linux_amd64.tar.gz
+sudo mv cortex_1.0.1_linux_amd64/cortex /usr/local/bin/
 ```
 
 **Linux (arm64):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_linux_arm64.tar.gz
-tar -xzf cortex_1.0.0_linux_arm64.tar.gz
-sudo mv cortex_1.0.0_linux_arm64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_linux_arm64.tar.gz
+tar -xzf cortex_1.0.1_linux_arm64.tar.gz
+sudo mv cortex_1.0.1_linux_arm64/cortex /usr/local/bin/
 ```
 
 **macOS (Apple Silicon):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_arm64.tar.gz
-tar -xzf cortex_1.0.0_darwin_arm64.tar.gz
-sudo mv cortex_1.0.0_darwin_arm64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_darwin_arm64.tar.gz
+tar -xzf cortex_1.0.1_darwin_arm64.tar.gz
+sudo mv cortex_1.0.1_darwin_arm64/cortex /usr/local/bin/
 ```
 
 **macOS (Intel):**
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_amd64.tar.gz
-tar -xzf cortex_1.0.0_darwin_amd64.tar.gz
-sudo mv cortex_1.0.0_darwin_amd64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_darwin_amd64.tar.gz
+tar -xzf cortex_1.0.1_darwin_amd64.tar.gz
+sudo mv cortex_1.0.1_darwin_amd64/cortex /usr/local/bin/
 ```
 
 **Windows:**
 
-Download `cortex_1.0.0_windows_amd64.zip` from [releases](https://github.com/petal-labs/cortex/releases/latest), extract, and add to your PATH.
+Download `cortex_1.0.1_windows_amd64.zip` from [releases](https://github.com/petal-labs/cortex/releases/latest), extract, and add to your PATH.
 
 ### Build from Source
 
@@ -95,7 +95,11 @@ go build -o cortex ./cmd/cortex
 
 ```bash
 cortex --version
+# cortex version 1.0.1 (a1b2c3d, 2026-08-16T22:00:00Z)
 ```
+
+Release binaries report the version, commit, and build date. A binary built
+from source without ldflags reports `cortex version dev`.
 
 ## Quick Start
 

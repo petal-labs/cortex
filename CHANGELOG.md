@@ -5,6 +5,25 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-08-16
+
+### Fixed
+
+- **CLI**
+  - `cortex --version` now works. The flag did not exist — the root command
+    never set a version — so the command documented under "Verify
+    Installation" failed with `unknown flag: --version`.
+  - Release binaries now carry their build information. The Makefile and
+    release workflow passed `-X main.version=...`, `-X main.commit=...`, and
+    `-X main.date=...` to a `package main` that declared none of those
+    variables; the Go linker ignores an `-X` flag naming a symbol that does
+    not exist, without warning, so every binary through v1.0.0 shipped with
+    no version at all.
+
+  Release builds now report `cortex version 1.0.1 (<commit>, <date>)`.
+  A binary built without ldflags reports `cortex version dev` rather than
+  leaving the flag unavailable.
+
 ## [1.0.0] - 2026-08-16
 
 First stable release. Cortex's storage, MCP wire contract, and public Go API
@@ -277,6 +296,7 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
+[1.0.1]: https://github.com/petal-labs/cortex/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/petal-labs/cortex/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/petal-labs/cortex/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/petal-labs/cortex/compare/v0.2.0...v0.2.1

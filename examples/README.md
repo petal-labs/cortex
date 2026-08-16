@@ -24,7 +24,7 @@ ARCH=$(uname -m)
 [ "$ARCH" = "x86_64" ] && ARCH=amd64
 [ "$ARCH" = "aarch64" ] && ARCH=arm64
 
-curl -LO "https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_${OS}_${ARCH}.tar.gz"
+curl -LO "https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_${OS}_${ARCH}.tar.gz"
 tar -xzf cortex_*.tar.gz
 sudo mv cortex_*/cortex /usr/local/bin/
 

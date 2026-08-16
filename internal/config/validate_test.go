@@ -242,3 +242,87 @@ embedding:
 		t.Errorf("expected pgvector backend, got %s", cfg.Storage.Backend)
 	}
 }
+
+// TestChatTimeoutDefaults verifies both chat-path timeouts default to an
+// explicit 120s — matching what the SDK would otherwise apply implicitly,
+// so behavior is unchanged but now visible and configurable.
+func TestChatTimeoutDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Summarization.Timeout != 120*time.Second {
+		t.Errorf("expected summarization.timeout default 120s, got %s", cfg.Summarization.Timeout)
+	}
+	if cfg.Entity.ExtractionTimeout != 120*time.Second {
+		t.Errorf("expected entity.extraction_timeout default 120s, got %s", cfg.Entity.ExtractionTimeout)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("defaults must validate: %v", err)
+	}
+}
+
+// TestValidateChatTimeouts rejects negative timeouts on both paths.
+func TestValidateChatTimeouts(t *testing.T) {
+	cases := []struct {
+		name       string
+		mutate     func(*Config)
+		wantSubstr string
+	}{
+		{
+			name:       "negative summarization timeout",
+			mutate:     func(c *Config) { c.Summarization.Timeout = -time.Second },
+			wantSubstr: "summarization.timeout must be >= 0",
+		},
+		{
+			name:       "negative extraction timeout",
+			mutate:     func(c *Config) { c.Entity.ExtractionTimeout = -time.Second },
+			wantSubstr: "entity.extraction_timeout must be >= 0",
+		},
+		{
+			name: "zero disables and is valid",
+			mutate: func(c *Config) {
+				c.Summarization.Timeout = 0
+				c.Entity.ExtractionTimeout = 0
+			},
+			wantSubstr: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mutate(t, tc.mutate).Validate()
+			if tc.wantSubstr == "" {
+				if err != nil {
+					t.Fatalf("expected valid, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("expected error containing %q, got: %v", tc.wantSubstr, err)
+			}
+		})
+	}
+}
+
+// TestLoadChatTimeoutOverrides verifies the knobs load from a config file.
+func TestLoadChatTimeoutOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+summarization:
+  timeout: 45s
+entity:
+  extraction_timeout: 0
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Summarization.Timeout != 45*time.Second {
+		t.Errorf("expected summarization.timeout 45s, got %s", cfg.Summarization.Timeout)
+	}
+	if cfg.Entity.ExtractionTimeout != 0 {
+		t.Errorf("expected entity.extraction_timeout 0 (disabled), got %s", cfg.Entity.ExtractionTimeout)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/petal-labs/iris/core"
 
@@ -103,6 +104,7 @@ type Extractor struct {
 	client    *core.Client
 	model     core.ModelID
 	maxTokens int
+	timeout   time.Duration
 }
 
 // NewExtractor creates a new entity extractor using the iris SDK.
@@ -122,6 +124,7 @@ func NewExtractor(cfg *config.Config) (*Extractor, error) {
 		client:    client,
 		model:     core.ModelID(cfg.Entity.ExtractionModel),
 		maxTokens: 2048, // Sufficient for entity extraction responses
+		timeout:   cfg.Entity.ExtractionTimeout,
 	}, nil
 }
 
@@ -139,6 +142,13 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 
 	if e.maxTokens > 0 {
 		builder = builder.MaxTokens(e.maxTokens)
+	}
+
+	// Explicit timeout opt-in (config entity.extraction_timeout). Without
+	// it the call inherits the SDK's implicit default silently; the builder
+	// only applies it when the caller supplied no deadline of its own.
+	if e.timeout > 0 {
+		builder = builder.Timeout(e.timeout)
 	}
 
 	resp, err := builder.GetResponse(ctx)

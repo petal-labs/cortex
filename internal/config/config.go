@@ -41,9 +41,10 @@ type EmbeddingConfig struct {
 
 // SummarizationConfig configures LLM summarization.
 type SummarizationConfig struct {
-	Provider  string `mapstructure:"provider"`
-	Model     string `mapstructure:"model"`
-	MaxTokens int    `mapstructure:"max_tokens"`
+	Provider  string        `mapstructure:"provider"`
+	Model     string        `mapstructure:"model"`
+	MaxTokens int           `mapstructure:"max_tokens"`
+	Timeout   time.Duration `mapstructure:"timeout"`
 }
 
 // ConversationConfig configures conversation memory.
@@ -82,6 +83,7 @@ type EntityConfig struct {
 	ExtractionMaxAttempts        int           `mapstructure:"extraction_max_attempts"`
 	ExtractionBackoff            string        `mapstructure:"extraction_backoff"`            // "fixed", "exponential"
 	ExtractionDeadLetterPolicy   string        `mapstructure:"extraction_dead_letter_policy"` // "retain", "drop"
+	ExtractionTimeout            time.Duration `mapstructure:"extraction_timeout"`
 }
 
 // RetentionConfig configures data lifecycle.
@@ -127,6 +129,9 @@ func DefaultConfig() *Config {
 			Provider:  "anthropic",
 			Model:     "claude-sonnet-4-6",
 			MaxTokens: 1024,
+			// Explicit opt-in to what iris would otherwise apply as an
+			// implicit 120s default; 0 disables the timeout.
+			Timeout: 120 * time.Second,
 		},
 		Conversation: ConversationConfig{
 			AutoSummarizeThreshold: 50,
@@ -157,6 +162,7 @@ func DefaultConfig() *Config {
 			ExtractionMaxAttempts:        5,
 			ExtractionBackoff:            "exponential",
 			ExtractionDeadLetterPolicy:   "retain",
+			ExtractionTimeout:            120 * time.Second,
 		},
 		Retention: RetentionConfig{
 			ConversationRetentionDays: 0, // 0 = no auto-delete
@@ -242,6 +248,7 @@ func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("summarization.provider", cfg.Summarization.Provider)
 	v.SetDefault("summarization.model", cfg.Summarization.Model)
 	v.SetDefault("summarization.max_tokens", cfg.Summarization.MaxTokens)
+	v.SetDefault("summarization.timeout", cfg.Summarization.Timeout)
 	v.SetDefault("conversation.auto_summarize_threshold", cfg.Conversation.AutoSummarizeThreshold)
 	v.SetDefault("conversation.default_history_limit", cfg.Conversation.DefaultHistoryLimit)
 	v.SetDefault("conversation.semantic_search_enabled", cfg.Conversation.SemanticSearchEnabled)
@@ -263,6 +270,7 @@ func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("entity.extraction_max_attempts", cfg.Entity.ExtractionMaxAttempts)
 	v.SetDefault("entity.extraction_backoff", cfg.Entity.ExtractionBackoff)
 	v.SetDefault("entity.extraction_dead_letter_policy", cfg.Entity.ExtractionDeadLetterPolicy)
+	v.SetDefault("entity.extraction_timeout", cfg.Entity.ExtractionTimeout)
 	v.SetDefault("retention.conversation_retention_days", cfg.Retention.ConversationRetentionDays)
 	v.SetDefault("retention.entity_stale_days", cfg.Retention.EntityStaleDays)
 	v.SetDefault("retention.context_run_retention_days", cfg.Retention.ContextRunRetentionDays)

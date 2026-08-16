@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -736,6 +737,74 @@ func optBool(args map[string]any, key string, defaultVal bool) (bool, *mcp.CallT
 	return b, nil
 }
 
+// maxExactJSONInt is the largest integer magnitude exactly representable in
+// a float64 (2^53). JSON numbers decode to float64, so any integer-valued
+// number above this bound may not equal what the client actually sent.
+const maxExactJSONInt = float64(1) * float64(1<<53)
+
+// validateJSONIntPrecision walks a decoded JSON value and rejects
+// integer-valued numbers whose magnitude exceeds 2^53. JSON arguments
+// decode every number to float64 before handler code runs, so such values
+// cannot be trusted to round-trip (9007199254740993 arrives as
+// 9007199254740992) — silently storing them would corrupt data such as
+// Snowflake IDs. Fractional floats are unaffected: they are honest floats.
+// Clients sending large integers are directed to use strings.
+func validateJSONIntPrecision(v any, path string) *mcp.CallToolResult {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, child := range val {
+			childPath := path + "." + k
+			if errResult := validateJSONIntPrecision(child, childPath); errResult != nil {
+				return errResult
+			}
+		}
+	case []any:
+		for i, child := range val {
+			childPath := fmt.Sprintf("%s[%d]", path, i)
+			if errResult := validateJSONIntPrecision(child, childPath); errResult != nil {
+				return errResult
+			}
+		}
+	case float64:
+		if val == math.Trunc(val) && math.Abs(val) > maxExactJSONInt {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"integer at %s exceeds 2^53 (%g) and cannot be transported safely as a JSON number; send large integers as strings",
+				path, val))
+		}
+	}
+	return nil
+}
+
+// parseExpectedVersion extracts the optional expected_version argument with
+// precision guards: it drives optimistic-concurrency checks, so a value
+// corrupted by float64 decoding (or a fractional value) must be rejected
+// rather than silently compared against the wrong version. Versions are
+// server-generated counters; anything above 2^53 is treated as unsafe.
+func parseExpectedVersion(args map[string]any) (*int64, *mcp.CallToolResult) {
+	v, ok := args["expected_version"]
+	if !ok {
+		return nil, nil
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return nil, mcp.NewToolResultError(fmt.Sprintf(
+			"parameter \"expected_version\" must be a number, got %s", argTypeName(v)))
+	}
+	if f != math.Trunc(f) {
+		return nil, mcp.NewToolResultError(fmt.Sprintf(
+			"parameter \"expected_version\" must be a whole number, got %v", f))
+	}
+	if math.Abs(f) > maxExactJSONInt {
+		return nil, mcp.NewToolResultError(fmt.Sprintf(
+			"parameter \"expected_version\" exceeds 2^53 (%v) and cannot be compared safely", int64(f)))
+	}
+	iv := int64(f)
+	if iv <= 0 {
+		return nil, nil
+	}
+	return &iv, nil
+}
+
 func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	namespace, err := req.RequireString("namespace")
 	if err != nil {
@@ -1234,6 +1303,9 @@ func (s *Server) handleContextSet(ctx context.Context, req mcp.CallToolRequest) 
 	if !ok {
 		return mcp.NewToolResultError("value is required"), nil
 	}
+	if errResult := validateJSONIntPrecision(value, "value"); errResult != nil {
+		return errResult, nil
+	}
 
 	opts := &ctxengine.SetOpts{}
 	args := req.GetArguments()
@@ -1249,13 +1321,9 @@ func (s *Server) handleContextSet(ctx context.Context, req mcp.CallToolRequest) 
 	if ttlSeconds > 0 {
 		opts.TTL = time.Duration(ttlSeconds) * time.Second
 	}
-	expectedVersion, errResult := optFloat(args, "expected_version", 0)
+	opts.ExpectedVersion, errResult = parseExpectedVersion(args)
 	if errResult != nil {
 		return errResult, nil
-	}
-	if expectedVersion > 0 {
-		v := int64(expectedVersion)
-		opts.ExpectedVersion = &v
 	}
 
 	result, err := s.context.Set(ctx, namespace, key, value, opts)
@@ -1284,6 +1352,9 @@ func (s *Server) handleContextMerge(ctx context.Context, req mcp.CallToolRequest
 	if !ok {
 		return mcp.NewToolResultError("value is required"), nil
 	}
+	if errResult := validateJSONIntPrecision(value, "value"); errResult != nil {
+		return errResult, nil
+	}
 
 	opts := &ctxengine.MergeOpts{}
 	args := req.GetArguments()
@@ -1298,13 +1369,9 @@ func (s *Server) handleContextMerge(ctx context.Context, req mcp.CallToolRequest
 	if errResult != nil {
 		return errResult, nil
 	}
-	expectedVersion, errResult := optFloat(args, "expected_version", 0)
+	opts.ExpectedVersion, errResult = parseExpectedVersion(args)
 	if errResult != nil {
 		return errResult, nil
-	}
-	if expectedVersion > 0 {
-		v := int64(expectedVersion)
-		opts.ExpectedVersion = &v
 	}
 
 	result, err := s.context.Merge(ctx, namespace, key, value, opts)

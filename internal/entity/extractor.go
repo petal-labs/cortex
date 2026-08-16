@@ -28,44 +28,57 @@ Text:`
 
 // entityExtractionSchema defines the JSON schema for structured output.
 // This ensures the model returns valid, parseable JSON matching our ExtractedEntity type.
+//
+// The root MUST be an object: OpenAI-style structured output rejects array
+// roots at request time (before any response is generated), which would kill
+// extraction entirely on providers that enforce it. Strict mode also requires
+// additionalProperties:false at every level and every property in required
+// (optional fields expressed as nullable types).
 var entityExtractionSchema = &core.JSONSchemaDefinition{
 	Name:        "entity_extraction",
 	Description: "Array of extracted entities from text",
 	Strict:      true,
 	Schema: json.RawMessage(`{
-		"type": "array",
-		"items": {
-			"type": "object",
-			"properties": {
-				"name": {
-					"type": "string",
-					"description": "The canonical name of the entity"
-				},
-				"type": {
-					"type": "string",
-					"enum": ["person", "organization", "product", "location", "concept"],
-					"description": "The type of entity"
-				},
-				"aliases": {
-					"type": "array",
-					"items": {"type": "string"},
-					"description": "Alternative names or abbreviations"
-				},
-				"attributes": {
+		"type": "object",
+		"properties": {
+			"entities": {
+				"type": "array",
+				"items": {
 					"type": "object",
-					"additionalProperties": {"type": "string"},
-					"description": "Key facts about the entity"
-				},
-				"confidence": {
-					"type": "number",
-					"minimum": 0,
-					"maximum": 1,
-					"description": "Confidence score from 0.0 to 1.0"
+					"properties": {
+						"name": {
+							"type": "string",
+							"description": "The canonical name of the entity"
+						},
+						"type": {
+							"type": "string",
+							"enum": ["person", "organization", "product", "location", "concept"],
+							"description": "The type of entity"
+						},
+						"aliases": {
+							"type": ["array", "null"],
+							"items": {"type": "string"},
+							"description": "Alternative names or abbreviations"
+						},
+						"attributes": {
+							"type": ["object", "null"],
+							"additionalProperties": {"type": "string"},
+							"description": "Key facts about the entity"
+						},
+						"confidence": {
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1,
+							"description": "Confidence score from 0.0 to 1.0"
+						}
+					},
+					"required": ["name", "type", "aliases", "attributes", "confidence"],
+					"additionalProperties": false
 				}
-			},
-			"required": ["name", "type", "confidence"],
-			"additionalProperties": false
-		}
+			}
+		},
+		"required": ["entities"],
+		"additionalProperties": false
 	}`),
 }
 
@@ -142,14 +155,12 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 		return nil, fmt.Errorf("extraction completion failed: %w", err)
 	}
 
-	// Parse the structured JSON response directly
-	var entities []ExtractedEntity
-	if err := json.Unmarshal([]byte(resp.Output), &entities); err != nil {
-		// Fallback to legacy parsing for providers that don't fully support structured output
-		entities, err = parseExtractionResponse(resp.Output)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse extraction response: %w", err)
-		}
+	// Parse the structured JSON response. The schema wraps entities in an
+	// object root; fall back to legacy array parsing for providers that
+	// ignore the schema root.
+	entities, err := parseStructuredEntities(resp.Output)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse extraction response: %w", err)
 	}
 
 	// Validate and normalize entities
@@ -170,6 +181,20 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 		Relationships: relationships,
 		SourceText:    text,
 	}, nil
+}
+
+// parseStructuredEntities parses the LLM response, handling both the
+// object-wrapped form ({"entities": [...]}, matching entityExtractionSchema)
+// and the raw array form ([...]) returned by providers that ignore the
+// schema root.
+func parseStructuredEntities(content string) ([]ExtractedEntity, error) {
+	var wrapper struct {
+		Entities []ExtractedEntity `json:"entities"`
+	}
+	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && wrapper.Entities != nil {
+		return wrapper.Entities, nil
+	}
+	return parseExtractionResponse(content)
 }
 
 // parseExtractionResponse parses the LLM response into extracted entities.

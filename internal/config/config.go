@@ -27,6 +27,12 @@ type StorageConfig struct {
 	Backend     string `mapstructure:"backend"`      // "sqlite" or "pgvector"
 	DataDir     string `mapstructure:"data_dir"`     // For SQLite
 	DatabaseURL string `mapstructure:"database_url"` // For pgvector
+
+	// Pool sizing for pgvector. 0 = unset: the database URL's
+	// pool_max_conns/pool_min_conns query params apply, falling back to
+	// built-in defaults. Explicit values take precedence over the URL.
+	PoolMaxConns int `mapstructure:"pool_max_conns"`
+	PoolMinConns int `mapstructure:"pool_min_conns"`
 }
 
 // EmbeddingConfig configures embedding generation.
@@ -239,6 +245,8 @@ func Load(configPath string) (*Config, error) {
 func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("storage.backend", cfg.Storage.Backend)
 	v.SetDefault("storage.data_dir", cfg.Storage.DataDir)
+	v.SetDefault("storage.pool_max_conns", cfg.Storage.PoolMaxConns)
+	v.SetDefault("storage.pool_min_conns", cfg.Storage.PoolMinConns)
 	v.SetDefault("embedding.provider", cfg.Embedding.Provider)
 	v.SetDefault("embedding.model", cfg.Embedding.Model)
 	v.SetDefault("embedding.dimensions", cfg.Embedding.Dimensions)

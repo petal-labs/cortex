@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -21,6 +22,17 @@ type Backend struct {
 	cfg  *config.Config
 }
 
+// Historical pool sizing defaults, kept so unset deployments behave
+// exactly as before the knobs existed.
+const (
+	defaultMaxConns = 25
+	defaultMinConns = 5
+
+	// defaultMaxConnsLimit is a hard ceiling on configured pool sizes,
+	// far beyond any sane deployment and within int32 for pgxpool.
+	defaultMaxConnsLimit = 1 << 20
+)
+
 // Ensure Backend implements storage.Backend.
 var _ storage.Backend = (*Backend)(nil)
 
@@ -35,9 +47,10 @@ func New(cfg *config.Config) (*Backend, error) {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Configure connection pool
-	poolConfig.MaxConns = 25
-	poolConfig.MinConns = 5
+	// Configure connection pool sizing.
+	if err := applyPoolSizing(poolConfig, cfg); err != nil {
+		return nil, err
+	}
 
 	// Ensure the pgvector extension exists and register vector types on every
 	// pooled connection. RegisterTypes queries to_regtype('vector')::oid, which
@@ -76,6 +89,45 @@ func New(cfg *config.Config) (*Backend, error) {
 	}
 
 	return b, nil
+}
+
+// applyPoolSizing resolves effective pool sizes onto poolConfig with
+// precedence per parameter: explicit config (storage.pool_max_conns /
+// storage.pool_min_conns, > 0) > database URL query params
+// (pool_max_conns / pool_min_conns, already applied by ParseConfig) >
+// historical defaults. This lets operators tune the pool either way;
+// previously hardcoded values silently stomped both.
+func applyPoolSizing(poolConfig *pgxpool.Config, cfg *config.Config) error {
+	urlQuery := url.Values{}
+	if u, err := url.Parse(cfg.Storage.DatabaseURL); err == nil {
+		urlQuery = u.Query()
+	}
+
+	// Config validation bounds these to sane values; the guards keep the
+	// int->int32 conversions overflow-safe regardless of construction path.
+	if v := cfg.Storage.PoolMaxConns; v > 0 {
+		if v > defaultMaxConnsLimit {
+			v = defaultMaxConnsLimit
+		}
+		poolConfig.MaxConns = int32(v)
+	} else if !urlQuery.Has("pool_max_conns") {
+		poolConfig.MaxConns = defaultMaxConns
+	}
+
+	if v := cfg.Storage.PoolMinConns; v > 0 {
+		if v > defaultMaxConnsLimit {
+			v = defaultMaxConnsLimit
+		}
+		poolConfig.MinConns = int32(v)
+	} else if !urlQuery.Has("pool_min_conns") {
+		poolConfig.MinConns = defaultMinConns
+	}
+
+	if poolConfig.MinConns > poolConfig.MaxConns {
+		return fmt.Errorf("invalid pool sizing: pool_min_conns (%d) exceeds pool_max_conns (%d) (check storage.pool_* config and database URL params)",
+			poolConfig.MinConns, poolConfig.MaxConns)
+	}
+	return nil
 }
 
 // Close releases the connection pool.

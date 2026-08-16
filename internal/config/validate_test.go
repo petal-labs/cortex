@@ -326,3 +326,92 @@ entity:
 		t.Errorf("expected entity.extraction_timeout 0 (disabled), got %s", cfg.Entity.ExtractionTimeout)
 	}
 }
+
+// TestValidatePoolSizing covers the pgvector pool sizing knobs: 0 means
+// unset (URL params or defaults apply), negatives and inverted ranges are
+// rejected.
+func TestValidatePoolSizing(t *testing.T) {
+	cases := []struct {
+		name       string
+		mutate     func(*Config)
+		wantSubstr string
+	}{
+		{
+			name: "zeros are unset and valid",
+			mutate: func(c *Config) {
+				c.Storage.PoolMaxConns = 0
+				c.Storage.PoolMinConns = 0
+			},
+		},
+		{
+			name: "valid explicit values",
+			mutate: func(c *Config) {
+				c.Storage.PoolMaxConns = 10
+				c.Storage.PoolMinConns = 2
+			},
+		},
+		{
+			name: "equal min and max valid",
+			mutate: func(c *Config) {
+				c.Storage.PoolMaxConns = 10
+				c.Storage.PoolMinConns = 10
+			},
+		},
+		{
+			name:       "negative max conns",
+			mutate:     func(c *Config) { c.Storage.PoolMaxConns = -1 },
+			wantSubstr: "storage.pool_max_conns must be >= 0",
+		},
+		{
+			name:       "negative min conns",
+			mutate:     func(c *Config) { c.Storage.PoolMinConns = -3 },
+			wantSubstr: "storage.pool_min_conns must be >= 0",
+		},
+		{
+			name: "min exceeds max",
+			mutate: func(c *Config) {
+				c.Storage.PoolMaxConns = 5
+				c.Storage.PoolMinConns = 9
+			},
+			wantSubstr: "storage.pool_min_conns (9) must not exceed storage.pool_max_conns (5)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mutate(t, tc.mutate).Validate()
+			if tc.wantSubstr == "" {
+				if err != nil {
+					t.Fatalf("expected valid, got: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("expected error containing %q, got: %v", tc.wantSubstr, err)
+			}
+		})
+	}
+}
+
+// TestLoadPoolSizingOverrides verifies the pool knobs load from YAML.
+func TestLoadPoolSizingOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+storage:
+  backend: pgvector
+  database_url: postgres://localhost/cortex
+  pool_max_conns: 40
+  pool_min_conns: 10
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Storage.PoolMaxConns != 40 || cfg.Storage.PoolMinConns != 10 {
+		t.Errorf("expected 40/10, got %d/%d", cfg.Storage.PoolMaxConns, cfg.Storage.PoolMinConns)
+	}
+}

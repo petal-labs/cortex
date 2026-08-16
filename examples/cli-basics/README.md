@@ -146,6 +146,10 @@ cortex entity list --type person
 cortex entity search "software engineer"
 ```
 
+Valid types are `person`, `organization`, `product`, `location`, `concept`,
+`event`, and `other`. Any other value is rejected rather than silently
+treated as a different type.
+
 ### Manage Entities
 
 ```bash
@@ -261,8 +265,18 @@ storage:
 
 embedding:
   dimensions: 1536
+  timeout: 120s
 
 knowledge:
   default_chunk_strategy: sentence
   default_chunk_max_tokens: 512
+```
+
+The config is validated at startup. Bad values abort the command and are
+reported together, each with its config key:
+
+```
+invalid config:
+  - knowledge.default_chunk_max_tokens must be > 0 (got 0)
+  - storage.backend "mysql" is not supported (supported: "sqlite", "pgvector")
 ```

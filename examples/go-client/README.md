@@ -34,32 +34,76 @@ go run main.go
 
 ## Key Concepts
 
+### Configuration
+
+Both backends and the embedding client are constructed from a `*config.Config`:
+
+```go
+import "github.com/petal-labs/cortex/internal/config"
+
+// Defaults, then override what you need
+cfg := config.DefaultConfig()
+cfg.Storage.DataDir = "./data"
+
+// Or load from disk. Load validates the result and returns an error
+// listing every invalid value by config key.
+cfg, err := config.Load("~/.cortex/config.yaml")
+```
+
+Building a `Config` by hand skips validation — call `cfg.Validate()` yourself
+if the values came from somewhere untrusted.
+
 ### Storage Backend
 
-Cortex supports two storage backends:
+Cortex supports two storage backends. Both apply versioned migrations through
+`Migrate`, which records the applied version and runs only what is pending:
 
 ```go
 import "github.com/petal-labs/cortex/internal/storage/sqlite"
 
-// SQLite (local, zero-config)
-store, err := sqlite.New(sqlite.Config{
-    Path: "./cortex.db",
-})
+// SQLite (local, zero-config) — uses cfg.Storage.DataDir
+store, err := sqlite.New(cfg)
+if err != nil {
+    return err
+}
+defer store.Close()
+
+if err := store.Migrate(ctx); err != nil {
+    return err
+}
 ```
+
+For pgvector, set `cfg.Storage.Backend = "pgvector"` and
+`cfg.Storage.DatabaseURL`. The schema's `vector(N)` columns are generated from
+`cfg.Embedding.Dimensions`; pointing a differently-dimensioned config at an
+existing database is a startup error rather than a silent bad write.
 
 ### Embedding Provider
 
-For semantic search, you need an embedding provider:
+For semantic search, you need an embedding provider. The Iris client reads its
+provider, model, dimensions, and timeout from the config:
 
 ```go
 import "github.com/petal-labs/cortex/internal/embedding"
 
-// Using Iris embedding service
-provider := embedding.NewIrisProvider(embedding.IrisConfig{
-    Endpoint:   "http://localhost:8000",
-    Dimensions: 1536,
-})
+cfg.Embedding.Provider = "openai"
+cfg.Embedding.Model = "text-embedding-3-small"
+cfg.Embedding.Dimensions = 1536
+cfg.Embedding.Timeout = 120 * time.Second // 0 disables
+
+provider, err := embedding.NewIrisClient(cfg)
+if err != nil {
+    return err
+}
+defer provider.Close()
+
+// Pass it to an engine instead of nil to enable semantic search
+engine, err := knowledge.NewEngine(store, provider, &cfg.Knowledge)
 ```
+
+Transient provider failures are retried with backoff; permanent ones are not.
+Returned vectors are checked against `cfg.Embedding.Dimensions`, so a
+mismatched model fails at the call rather than corrupting the index.
 
 ### Engines
 

@@ -404,3 +404,145 @@ func TestIrisClientEmbedBatchDuplicateIndex(t *testing.T) {
 		t.Errorf("expected duplicate-index message, got: %v", err)
 	}
 }
+
+// recordingProvider records the input texts of each provider call and
+// returns vectors marked with the first byte of each input text, so tests
+// can assert both split boundaries and result ordering. Optionally fails
+// on the Nth call (1-based) with a non-retryable 400.
+type recordingProvider struct {
+	dims       int
+	calls      [][]string
+	failOnCall int
+}
+
+func (r *recordingProvider) CreateEmbeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	texts := make([]string, len(req.Input))
+	for i, in := range req.Input {
+		texts[i] = in.Text
+	}
+	r.calls = append(r.calls, texts)
+
+	if r.failOnCall > 0 && len(r.calls) == r.failOnCall {
+		return nil, &core.ProviderError{Provider: "test", Status: 400, Message: "boom"}
+	}
+
+	vectors := make([]core.EmbeddingVector, len(req.Input))
+	for i, in := range req.Input {
+		vec := make([]float32, r.dims)
+		vec[0] = float32(in.Text[0]) // inputs are non-empty in these tests
+		vectors[i] = core.EmbeddingVector{Index: i, Vector: vec}
+	}
+	return &core.EmbeddingResponse{Vectors: vectors}, nil
+}
+
+// TestIrisClientEmbedBatchAutoSplits verifies that inputs exceeding the
+// batch size are split into batch-sized provider calls and the results are
+// concatenated in input order.
+func TestIrisClientEmbedBatchAutoSplits(t *testing.T) {
+	fake := &recordingProvider{dims: 2}
+	c := &IrisClient{provider: fake, dimensions: 2, batchSize: 2}
+
+	texts := []string{"a", "b", "c", "d", "e"}
+	embs, err := c.EmbedBatch(context.Background(), texts)
+	if err != nil {
+		t.Fatalf("expected auto-splitting to succeed, got: %v", err)
+	}
+
+	if len(embs) != 5 {
+		t.Fatalf("expected 5 embeddings, got %d", len(embs))
+	}
+	// Split boundaries: [a b] [c d] [e]
+	if len(fake.calls) != 3 {
+		t.Fatalf("expected 3 provider calls, got %d", len(fake.calls))
+	}
+	for i, want := range [][]string{{"a", "b"}, {"c", "d"}, {"e"}} {
+		got := fake.calls[i]
+		if len(got) != len(want) {
+			t.Fatalf("call %d: expected %d inputs, got %d", i, len(want), len(got))
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Errorf("call %d input %d: expected %q, got %q", i, j, want[j], got[j])
+			}
+		}
+	}
+	// Concatenated in input order.
+	for i, text := range texts {
+		if embs[i][0] != float32(text[0]) {
+			t.Errorf("result %d carries %q's vector, expected %q's", i, string(rune(embs[i][0])), text)
+		}
+	}
+}
+
+// TestIrisClientEmbedBatchAutoSplitFailurePropagates verifies a failing
+// sub-batch fails the whole call rather than returning partial results.
+func TestIrisClientEmbedBatchAutoSplitFailurePropagates(t *testing.T) {
+	fake := &recordingProvider{dims: 2, failOnCall: 2}
+	c := &IrisClient{provider: fake, dimensions: 2, batchSize: 2}
+
+	_, err := c.EmbedBatch(context.Background(), []string{"a", "b", "c", "d"})
+	if err == nil {
+		t.Fatal("expected error when a sub-batch fails, got nil")
+	}
+	if !errors.Is(err, ErrProviderFailed) {
+		t.Errorf("expected ErrProviderFailed, got %v", err)
+	}
+	if len(fake.calls) != 2 {
+		t.Errorf("expected processing to stop at the failed call, got %d calls", len(fake.calls))
+	}
+}
+
+// TestIrisClientEmbedBatchAutoSplitWithEmptyInputs verifies empty inputs
+// get zero vectors at their original positions across sub-batches.
+func TestIrisClientEmbedBatchAutoSplitWithEmptyInputs(t *testing.T) {
+	fake := &recordingProvider{dims: 1}
+	c := &IrisClient{provider: fake, dimensions: 1, batchSize: 2}
+
+	texts := []string{"", "a", "", "b", "c"}
+	embs, err := c.EmbedBatch(context.Background(), texts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(embs) != 5 {
+		t.Fatalf("expected 5 embeddings, got %d", len(embs))
+	}
+	// Zero vectors at the empty positions.
+	for _, i := range []int{0, 2} {
+		if embs[i][0] != 0 {
+			t.Errorf("expected zero vector at position %d, got %v", i, embs[i])
+		}
+	}
+	// Correct vectors at the non-empty positions.
+	if embs[1][0] != 'a' || embs[3][0] != 'b' || embs[4][0] != 'c' {
+		t.Errorf("misordered results across sub-batches: got %v %v %v",
+			string(rune(embs[1][0])), string(rune(embs[3][0])), string(rune(embs[4][0])))
+	}
+	// Empty inputs are dropped from provider calls: sub-batches split on the
+	// original positions ["", "a"] ["", "b"] ["c"] → one non-empty each.
+	if len(fake.calls) != 3 {
+		t.Errorf("unexpected provider call count: %v", fake.calls)
+	}
+	for i, call := range fake.calls {
+		if len(call) != 1 {
+			t.Errorf("call %d: expected 1 non-empty input, got %v", i, call)
+		}
+	}
+}
+
+// TestIrisClientEmbedBatchNoLimit verifies batchSize <= 0 means no limit:
+// everything goes in a single provider call.
+func TestIrisClientEmbedBatchNoLimit(t *testing.T) {
+	fake := &recordingProvider{dims: 1}
+	c := &IrisClient{provider: fake, dimensions: 1, batchSize: 0}
+
+	embs, err := c.EmbedBatch(context.Background(), []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(embs) != 3 {
+		t.Fatalf("expected 3 embeddings, got %d", len(embs))
+	}
+	if len(fake.calls) != 1 {
+		t.Errorf("expected 1 provider call with no batch limit, got %d", len(fake.calls))
+	}
+}

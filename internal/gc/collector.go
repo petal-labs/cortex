@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"fmt"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -47,11 +48,32 @@ func (c *Collector) Start() {
 	)
 }
 
-// Stop gracefully stops the garbage collector.
+// Stop gracefully stops the garbage collector. It waits indefinitely for
+// goroutines to exit — prefer Shutdown for a bounded wait.
 func (c *Collector) Stop() {
 	close(c.stopCh)
 	c.wg.Wait()
 	observability.Info(context.Background(), "garbage collector stopped")
+}
+
+// Shutdown signals the collector to stop and waits for goroutines to exit,
+// returning an error if the timeout is exceeded.
+func (c *Collector) Shutdown(timeout time.Duration) error {
+	close(c.stopCh)
+
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		observability.Info(context.Background(), "garbage collector stopped")
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("garbage collector did not shut down within %s", timeout)
+	}
 }
 
 // runGCLoop runs the main garbage collection at the configured interval.

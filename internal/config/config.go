@@ -99,11 +99,12 @@ type NamespaceConfig struct {
 
 // ServerConfig configures the server.
 type ServerConfig struct {
-	LogLevel          string `mapstructure:"log_level"`
-	MetricsEnabled    bool   `mapstructure:"metrics_enabled"`
-	MetricsPort       int    `mapstructure:"metrics_port"`
-	StructuredLogging bool   `mapstructure:"structured_logging"`
-	RequestIDHeader   string `mapstructure:"request_id_header"`
+	LogLevel          string        `mapstructure:"log_level"`
+	MetricsEnabled    bool          `mapstructure:"metrics_enabled"`
+	MetricsPort       int           `mapstructure:"metrics_port"`
+	StructuredLogging bool          `mapstructure:"structured_logging"`
+	RequestIDHeader   string        `mapstructure:"request_id_header"`
+	ShutdownTimeout   time.Duration `mapstructure:"shutdown_timeout"`
 }
 
 // DefaultConfig returns a Config with default values.
@@ -172,6 +173,7 @@ func DefaultConfig() *Config {
 			MetricsPort:       9811,
 			StructuredLogging: true,
 			RequestIDHeader:   "X-PetalFlow-Request-ID",
+			ShutdownTimeout:   30 * time.Second,
 		},
 	}
 }

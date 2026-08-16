@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"context"
+	"os/signal"
+	"syscall"
+
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +22,9 @@ It implements four memory primitives:
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {

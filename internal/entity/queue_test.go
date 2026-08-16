@@ -318,3 +318,24 @@ func TestQueueProcessorPanicRecovery(t *testing.T) {
 
 	processor.Stop()
 }
+
+func TestQueueProcessorShutdown(t *testing.T) {
+	processor, _, backend := setupTestQueueProcessor(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	processor.Start(ctx)
+
+	if !processor.IsRunning() {
+		t.Fatal("expected processor to be running")
+	}
+
+	// Shutdown with a generous timeout should return nil.
+	if err := processor.Shutdown(5 * time.Second); err != nil {
+		t.Fatalf("Shutdown returned error: %v", err)
+	}
+
+	if processor.IsRunning() {
+		t.Error("expected processor to not be running after shutdown")
+	}
+}

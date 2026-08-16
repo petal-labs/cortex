@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/petal-labs/cortex/internal/config"
 	ctxengine "github.com/petal-labs/cortex/internal/context"
@@ -63,6 +65,8 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	// Load configuration
 	configPath, _ := cmd.Flags().GetString("config")
 	cfg, err := loadConfig(configPath)
@@ -165,7 +169,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Start garbage collector in background
 	gcCollector := gc.NewCollector(store, cfg)
 	gcCollector.Start()
-	defer gcCollector.Stop()
+
+	// Start queue processor in background if configured
+	if queueProcessor != nil {
+		queueProcessor.Start(ctx)
+	}
 
 	// Start MCP server
 	if mcpMode {
@@ -177,26 +185,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		srv := server.New(mcpCfg, convEngine, knowEngine, ctxEngine, entityEngine)
 
-		// Start queue processor in background if configured
-		if queueProcessor != nil {
-			ctx := cmd.Context()
-			queueProcessor.Start(ctx)
-		}
-
+		// Run server in a goroutine so we can coordinate shutdown
+		errCh := make(chan error, 1)
 		// Select transport mode
 		switch transport {
 		case "stdio", "":
-			observability.Info(context.Background(), "starting MCP server with stdio transport")
-			return srv.ServeStdio()
+			observability.Info(ctx, "starting MCP server with stdio transport")
+			go func() { errCh <- srv.ServeStdio() }()
 
 		case "sse":
 			addr := fmt.Sprintf(":%d", port)
-			observability.Info(context.Background(), "starting MCP server with SSE transport",
+			observability.Info(ctx, "starting MCP server with SSE transport",
 				observability.Field("addr", addr),
 				observability.Field("sse_endpoint", fmt.Sprintf("/sse")),
 				observability.Field("message_endpoint", fmt.Sprintf("/message")),
 			)
-			// Also print to stdout for non-structured logging
 			if !cfg.Server.StructuredLogging {
 				fmt.Printf("Starting Cortex MCP server with SSE transport on %s\n", addr)
 				fmt.Printf("  SSE endpoint: http://localhost:%d/sse\n", port)
@@ -205,11 +208,36 @@ func runServe(cmd *cobra.Command, args []string) error {
 					fmt.Printf("  Metrics endpoint: http://localhost:%d/metrics\n", cfg.Server.MetricsPort)
 				}
 			}
-			return srv.ServeSSE(addr)
+			go func() { errCh <- srv.ServeSSE(addr) }()
 
 		default:
 			return fmt.Errorf("unknown transport: %q (supported: stdio, sse)", transport)
 		}
+
+		// Wait for shutdown signal or server error
+		select {
+		case <-ctx.Done():
+			observability.Info(context.Background(), "shutdown signal received, coordinating graceful shutdown")
+		case err := <-errCh:
+			return err
+		}
+
+		// Bounded shutdown of background workers
+		shutdownTimeout := cfg.Server.ShutdownTimeout
+		if shutdownTimeout <= 0 {
+			shutdownTimeout = 30 * time.Second
+		}
+
+		if queueProcessor != nil {
+			if err := queueProcessor.Shutdown(shutdownTimeout); err != nil {
+				observability.Error(context.Background(), "queue processor shutdown timeout", zap.Error(err))
+			}
+		}
+		if err := gcCollector.Shutdown(shutdownTimeout); err != nil {
+			observability.Error(context.Background(), "garbage collector shutdown timeout", zap.Error(err))
+		}
+
+		return nil
 	}
 
 	return fmt.Errorf("only MCP mode is currently supported")

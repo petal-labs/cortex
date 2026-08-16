@@ -648,6 +648,94 @@ func toolError(err error) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultError("internal server error"), nil
 }
 
+// argTypeName returns a human-readable type name for an MCP argument value.
+func argTypeName(v any) string {
+	switch v.(type) {
+	case float64:
+		return "number"
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case map[string]any:
+		return "object"
+	case []any:
+		return "array"
+	case nil:
+		return "null"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+// optInt extracts an optional integer argument. If the key is absent the
+// default is returned. If the key is present but the value is not a number,
+// a tool error result is returned.
+func optInt(args map[string]any, key string, defaultVal int) (int, *mcp.CallToolResult) {
+	v, ok := args[key]
+	if !ok {
+		return defaultVal, nil
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return defaultVal, mcp.NewToolResultError(fmt.Sprintf("parameter %q must be a number, got %s", key, argTypeName(v)))
+	}
+	return int(f), nil
+}
+
+// optFloat extracts an optional float64 argument.
+func optFloat(args map[string]any, key string, defaultVal float64) (float64, *mcp.CallToolResult) {
+	v, ok := args[key]
+	if !ok {
+		return defaultVal, nil
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return defaultVal, mcp.NewToolResultError(fmt.Sprintf("parameter %q must be a number, got %s", key, argTypeName(v)))
+	}
+	return f, nil
+}
+
+// optString extracts an optional string argument.
+func optString(args map[string]any, key string, defaultVal string) (string, *mcp.CallToolResult) {
+	v, ok := args[key]
+	if !ok {
+		return defaultVal, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return defaultVal, mcp.NewToolResultError(fmt.Sprintf("parameter %q must be a string, got %s", key, argTypeName(v)))
+	}
+	return s, nil
+}
+
+// optStringPtr extracts an optional string argument as a pointer.
+// Returns nil if the key is absent.
+func optStringPtr(args map[string]any, key string) (*string, *mcp.CallToolResult) {
+	v, ok := args[key]
+	if !ok {
+		return nil, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return nil, mcp.NewToolResultError(fmt.Sprintf("parameter %q must be a string, got %s", key, argTypeName(v)))
+	}
+	return &s, nil
+}
+
+// optBool extracts an optional boolean argument.
+func optBool(args map[string]any, key string, defaultVal bool) (bool, *mcp.CallToolResult) {
+	v, ok := args[key]
+	if !ok {
+		return defaultVal, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return defaultVal, mcp.NewToolResultError(fmt.Sprintf("parameter %q must be a boolean, got %s", key, argTypeName(v)))
+	}
+	return b, nil
+}
+
 func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	namespace, err := req.RequireString("namespace")
 	if err != nil {
@@ -673,16 +761,17 @@ func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolR
 	}
 
 	opts := &conversation.AppendOpts{}
+	args := req.GetArguments()
 
-	// Optional metadata
-	if metadata, ok := req.GetArguments()["metadata"].(map[string]any); ok {
+	if metadata, ok := args["metadata"].(map[string]any); ok {
 		opts.Metadata = toStringMap(metadata)
 	}
 
-	// Optional max_content_length
-	if maxLen, ok := req.GetArguments()["max_content_length"].(float64); ok {
-		opts.MaxContentLength = int(maxLen)
+	maxLen, errResult := optInt(args, "max_content_length", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
+	opts.MaxContentLength = maxLen
 
 	result, err := s.conversation.Append(ctx, namespace, threadID, role, content, opts)
 	if err != nil {
@@ -707,17 +796,22 @@ func (s *Server) handleConversationHistory(ctx context.Context, req mcp.CallTool
 	}
 
 	opts := &conversation.HistoryOpts{}
+	args := req.GetArguments()
 
-	if lastN, ok := req.GetArguments()["last_n"].(float64); ok {
-		opts.LastN = int(lastN)
+	lastN, errResult := optInt(args, "last_n", 0)
+	if errResult != nil {
+		return errResult, nil
+	}
+	opts.LastN = lastN
+
+	opts.IncludeSummary, errResult = optBool(args, "include_summary", false)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if includeSummary, ok := req.GetArguments()["include_summary"].(bool); ok {
-		opts.IncludeSummary = includeSummary
-	}
-
-	if cursor, ok := req.GetArguments()["cursor"].(string); ok {
-		opts.Cursor = cursor
+	opts.Cursor, errResult = optString(args, "cursor", "")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.conversation.History(ctx, namespace, threadID, opts)
@@ -743,21 +837,30 @@ func (s *Server) handleConversationSearch(ctx context.Context, req mcp.CallToolR
 	}
 
 	opts := &conversation.SearchOpts{}
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
 
-	if threadID, ok := req.GetArguments()["thread_id"].(string); ok {
-		opts.ThreadID = &threadID
+	opts.ThreadID, errResult = optStringPtr(args, "thread_id")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if topK, ok := req.GetArguments()["top_k"].(float64); ok {
-		opts.TopK = int(topK)
+	opts.TopK, errResult = optInt(args, "top_k", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if searchMode, ok := req.GetArguments()["search_mode"].(string); ok {
+	searchMode, errResult := optString(args, "search_mode", "")
+	if errResult != nil {
+		return errResult, nil
+	}
+	if searchMode != "" {
 		opts.SearchMode = conversation.SearchMode(searchMode)
 	}
 
-	if alpha, ok := req.GetArguments()["alpha"].(float64); ok {
-		opts.Alpha = alpha
+	opts.Alpha, errResult = optFloat(args, "alpha", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.conversation.Search(ctx, namespace, query, opts)
@@ -783,10 +886,13 @@ func (s *Server) handleConversationSummarize(ctx context.Context, req mcp.CallTo
 	}
 
 	opts := &conversation.SummarizeOpts{}
+	args := req.GetArguments()
 
-	if keepRecent, ok := req.GetArguments()["keep_recent"].(float64); ok {
-		opts.KeepRecent = int(keepRecent)
+	keepRecent, errResult := optInt(args, "keep_recent", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
+	opts.KeepRecent = keepRecent
 
 	result, err := s.conversation.Summarize(ctx, namespace, threadID, opts)
 	if err != nil {
@@ -816,24 +922,29 @@ func (s *Server) handleKnowledgeIngest(ctx context.Context, req mcp.CallToolRequ
 	}
 
 	opts := &knowledge.IngestOpts{}
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
 
-	if title, ok := req.GetArguments()["title"].(string); ok {
-		opts.Title = title
+	opts.Title, errResult = optString(args, "title", "")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if contentType, ok := req.GetArguments()["content_type"].(string); ok {
-		opts.ContentType = contentType
+	opts.ContentType, errResult = optString(args, "content_type", "")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if source, ok := req.GetArguments()["source"].(string); ok {
-		opts.Source = source
+	opts.Source, errResult = optString(args, "source", "")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if metadata, ok := req.GetArguments()["metadata"].(map[string]any); ok {
+	if metadata, ok := args["metadata"].(map[string]any); ok {
 		opts.Metadata = toStringMap(metadata)
 	}
 
-	if chunkConfig, ok := req.GetArguments()["chunk_config"].(map[string]any); ok {
+	if chunkConfig, ok := args["chunk_config"].(map[string]any); ok {
 		opts.ChunkConfig = parseChunkConfig(chunkConfig)
 	}
 
@@ -860,51 +971,61 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 	}
 
 	opts := &knowledge.SearchOpts{}
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
 
-	if collectionID, ok := req.GetArguments()["collection_id"].(string); ok {
-		opts.CollectionID = &collectionID
+	opts.CollectionID, errResult = optStringPtr(args, "collection_id")
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if topK, ok := req.GetArguments()["top_k"].(float64); ok {
-		opts.TopK = int(topK)
+	opts.TopK, errResult = optInt(args, "top_k", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if minScore, ok := req.GetArguments()["min_score"].(float64); ok {
-		opts.MinScore = minScore
+	opts.MinScore, errResult = optFloat(args, "min_score", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if filters, ok := req.GetArguments()["filters"].(map[string]any); ok {
+	if filters, ok := args["filters"].(map[string]any); ok {
 		opts.Filters = toStringMap(filters)
 	}
 
-	// include_context controls whether to use context window
-	// When true (default), use context_window value; when false, set to 0
-	includeContext := true
-	if v, ok := req.GetArguments()["include_context"].(bool); ok {
-		includeContext = v
+	includeContext, errResult := optBool(args, "include_context", true)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if contextWindow, ok := req.GetArguments()["context_window"].(float64); ok && includeContext {
-		opts.ContextWindow = int(contextWindow)
-	} else if includeContext {
-		opts.ContextWindow = 1 // default context window
+	contextWindow, errResult := optInt(args, "context_window", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
-
-	// Parse search mode
-	if searchMode, ok := req.GetArguments()["search_mode"].(string); ok {
-		switch searchMode {
-		case "hybrid":
-			opts.SearchMode = knowledge.SearchModeHybrid
-		case "text":
-			opts.SearchMode = knowledge.SearchModeText
-		default:
-			opts.SearchMode = knowledge.SearchModeVector
+	if includeContext {
+		if contextWindow > 0 {
+			opts.ContextWindow = contextWindow
+		} else {
+			opts.ContextWindow = 1 // default context window
 		}
 	}
 
-	// Parse alpha for hybrid search weighting
-	if alpha, ok := req.GetArguments()["alpha"].(float64); ok {
-		opts.Alpha = alpha
+	searchMode, errResult := optString(args, "search_mode", "")
+	if errResult != nil {
+		return errResult, nil
+	}
+	switch searchMode {
+	case "hybrid":
+		opts.SearchMode = knowledge.SearchModeHybrid
+	case "text":
+		opts.SearchMode = knowledge.SearchModeText
+	default:
+		opts.SearchMode = knowledge.SearchModeVector
+	}
+
+	opts.Alpha, errResult = optFloat(args, "alpha", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.knowledge.Search(ctx, namespace, query, opts)
@@ -949,10 +1070,13 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 		opts := knowledge.CreateCollectionOpts{
 			Name: name,
 		}
-		if desc, ok := req.GetArguments()["description"].(string); ok {
-			opts.Description = desc
+		args := req.GetArguments()
+		desc, errResult := optString(args, "description", "")
+		if errResult != nil {
+			return errResult, nil
 		}
-		if chunkConfig, ok := req.GetArguments()["chunk_config"].(map[string]any); ok {
+		opts.Description = desc
+		if chunkConfig, ok := args["chunk_config"].(map[string]any); ok {
 			opts.ChunkConfig = parseChunkConfig(chunkConfig)
 		}
 
@@ -1034,20 +1158,23 @@ func (s *Server) handleKnowledgeBulkIngest(ctx context.Context, req mcp.CallTool
 	opts := &knowledge.BulkIngestOpts{
 		ContinueOnError: true, // default
 	}
+	args := req.GetArguments()
 
-	if concurrency, ok := req.GetArguments()["concurrency"].(float64); ok {
-		c := int(concurrency)
-		if c > 10 {
-			c = 10 // Cap at 10
-		}
-		opts.Concurrency = c
+	concurrency, errResult := optInt(args, "concurrency", 0)
+	if errResult != nil {
+		return errResult, nil
+	}
+	if concurrency > 10 {
+		concurrency = 10 // Cap at 10
+	}
+	opts.Concurrency = concurrency
+
+	opts.ContinueOnError, errResult = optBool(args, "continue_on_error", true)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	if continueOnError, ok := req.GetArguments()["continue_on_error"].(bool); ok {
-		opts.ContinueOnError = continueOnError
-	}
-
-	if chunkConfig, ok := req.GetArguments()["chunk_config"].(map[string]any); ok {
+	if chunkConfig, ok := args["chunk_config"].(map[string]any); ok {
 		opts.ChunkConfig = parseChunkConfig(chunkConfig)
 	}
 
@@ -1074,8 +1201,11 @@ func (s *Server) handleContextGet(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	opts := &ctxengine.GetOpts{}
-	if runID, ok := req.GetArguments()["run_id"].(string); ok {
-		opts.RunID = &runID
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
+	opts.RunID, errResult = optStringPtr(args, "run_id")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.context.Get(ctx, namespace, key, opts)
@@ -1106,13 +1236,24 @@ func (s *Server) handleContextSet(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	opts := &ctxengine.SetOpts{}
-	if runID, ok := req.GetArguments()["run_id"].(string); ok {
-		opts.RunID = &runID
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
+	opts.RunID, errResult = optStringPtr(args, "run_id")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if ttlSeconds, ok := req.GetArguments()["ttl_seconds"].(float64); ok {
+	ttlSeconds, errResult := optInt(args, "ttl_seconds", 0)
+	if errResult != nil {
+		return errResult, nil
+	}
+	if ttlSeconds > 0 {
 		opts.TTL = time.Duration(ttlSeconds) * time.Second
 	}
-	if expectedVersion, ok := req.GetArguments()["expected_version"].(float64); ok {
+	expectedVersion, errResult := optFloat(args, "expected_version", 0)
+	if errResult != nil {
+		return errResult, nil
+	}
+	if expectedVersion > 0 {
 		v := int64(expectedVersion)
 		opts.ExpectedVersion = &v
 	}
@@ -1145,13 +1286,23 @@ func (s *Server) handleContextMerge(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	opts := &ctxengine.MergeOpts{}
-	if strategy, ok := req.GetArguments()["strategy"].(string); ok {
+	args := req.GetArguments()
+	strategy, errResult := optString(args, "strategy", "")
+	if errResult != nil {
+		return errResult, nil
+	}
+	if strategy != "" {
 		opts.Strategy = types.MergeStrategy(strategy)
 	}
-	if runID, ok := req.GetArguments()["run_id"].(string); ok {
-		opts.RunID = &runID
+	opts.RunID, errResult = optStringPtr(args, "run_id")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if expectedVersion, ok := req.GetArguments()["expected_version"].(float64); ok {
+	expectedVersion, errResult := optFloat(args, "expected_version", 0)
+	if errResult != nil {
+		return errResult, nil
+	}
+	if expectedVersion > 0 {
 		v := int64(expectedVersion)
 		opts.ExpectedVersion = &v
 	}
@@ -1174,17 +1325,23 @@ func (s *Server) handleContextList(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	opts := &ctxengine.ListOpts{}
-	if prefix, ok := req.GetArguments()["prefix"].(string); ok {
-		opts.Prefix = &prefix
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
+	opts.Prefix, errResult = optStringPtr(args, "prefix")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if runID, ok := req.GetArguments()["run_id"].(string); ok {
-		opts.RunID = &runID
+	opts.RunID, errResult = optStringPtr(args, "run_id")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if cursor, ok := req.GetArguments()["cursor"].(string); ok {
-		opts.Cursor = cursor
+	opts.Cursor, errResult = optString(args, "cursor", "")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if limit, ok := req.GetArguments()["limit"].(float64); ok {
-		opts.Limit = int(limit)
+	opts.Limit, errResult = optInt(args, "limit", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.context.List(ctx, namespace, opts)
@@ -1210,14 +1367,19 @@ func (s *Server) handleContextHistory(ctx context.Context, req mcp.CallToolReque
 	}
 
 	opts := &ctxengine.HistoryOpts{}
-	if runID, ok := req.GetArguments()["run_id"].(string); ok {
-		opts.RunID = &runID
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
+	opts.RunID, errResult = optStringPtr(args, "run_id")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if cursor, ok := req.GetArguments()["cursor"].(string); ok {
-		opts.Cursor = cursor
+	opts.Cursor, errResult = optString(args, "cursor", "")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if limit, ok := req.GetArguments()["limit"].(float64); ok {
-		opts.Limit = int(limit)
+	opts.Limit, errResult = optInt(args, "limit", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.context.History(ctx, namespace, key, opts)
@@ -1242,14 +1404,20 @@ func (s *Server) handleEntityQuery(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Default include_mentions to true, mention_limit to 10
+	args := req.GetArguments()
+
 	mentionLimit := 10
 
-	if v, ok := req.GetArguments()["include_mentions"].(bool); ok && !v {
+	includeMentions, errResult := optBool(args, "include_mentions", true)
+	if errResult != nil {
+		return errResult, nil
+	}
+	if !includeMentions {
 		mentionLimit = 0
 	}
-	if v, ok := req.GetArguments()["mention_limit"].(float64); ok {
-		mentionLimit = int(v)
+	mentionLimit, errResult = optInt(args, "mention_limit", mentionLimit)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.entity.Query(ctx, namespace, name, mentionLimit)
@@ -1275,29 +1443,33 @@ func (s *Server) handleEntitySearch(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	opts := &entity.SearchOpts{}
-	if entityType, ok := req.GetArguments()["type"].(string); ok {
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
+	if entityType, ok := args["type"].(string); ok {
 		t := mapEntityType(entityType)
 		opts.EntityType = &t
 	}
-	if topK, ok := req.GetArguments()["top_k"].(float64); ok {
-		opts.TopK = int(topK)
+	opts.TopK, errResult = optInt(args, "top_k", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
-	// Parse search mode
-	if searchMode, ok := req.GetArguments()["search_mode"].(string); ok {
-		switch searchMode {
-		case "hybrid":
-			opts.SearchMode = entity.SearchModeHybrid
-		case "text":
-			opts.SearchMode = entity.SearchModeText
-		default:
-			opts.SearchMode = entity.SearchModeVector
-		}
+	searchMode, errResult := optString(args, "search_mode", "")
+	if errResult != nil {
+		return errResult, nil
+	}
+	switch searchMode {
+	case "hybrid":
+		opts.SearchMode = entity.SearchModeHybrid
+	case "text":
+		opts.SearchMode = entity.SearchModeText
+	default:
+		opts.SearchMode = entity.SearchModeVector
 	}
 
-	// Parse alpha for hybrid search weighting
-	if alpha, ok := req.GetArguments()["alpha"].(float64); ok {
-		opts.Alpha = alpha
+	opts.Alpha, errResult = optFloat(args, "alpha", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.entity.Search(ctx, namespace, query, opts)
@@ -1329,10 +1501,17 @@ func (s *Server) handleEntityRelationships(ctx context.Context, req mcp.CallTool
 	}
 
 	opts := &entity.GetRelationshipsOpts{}
-	if relationType, ok := req.GetArguments()["relation_type"].(string); ok {
-		opts.RelationType = &relationType
+	args := req.GetArguments()
+	var errResult *mcp.CallToolResult
+	opts.RelationType, errResult = optStringPtr(args, "relation_type")
+	if errResult != nil {
+		return errResult, nil
 	}
-	if direction, ok := req.GetArguments()["direction"].(string); ok {
+	direction, errResult := optString(args, "direction", "")
+	if errResult != nil {
+		return errResult, nil
+	}
+	if direction != "" {
 		opts.Direction = types.RelationshipDirection(direction)
 	}
 
@@ -1440,18 +1619,25 @@ func (s *Server) handleEntityList(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	opts := &entity.ListOpts{}
-	if entityType, ok := req.GetArguments()["type"].(string); ok {
+	args := req.GetArguments()
+	if entityType, ok := args["type"].(string); ok {
 		t := mapEntityType(entityType)
 		opts.EntityType = &t
 	}
-	if sortBy, ok := req.GetArguments()["sort_by"].(string); ok {
+	sortBy, errResult := optString(args, "sort_by", "")
+	if errResult != nil {
+		return errResult, nil
+	}
+	if sortBy != "" {
 		opts.SortBy = types.EntitySortBy(sortBy)
 	}
-	if limit, ok := req.GetArguments()["limit"].(float64); ok {
-		opts.Limit = int(limit)
+	opts.Limit, errResult = optInt(args, "limit", 0)
+	if errResult != nil {
+		return errResult, nil
 	}
-	if cursor, ok := req.GetArguments()["cursor"].(string); ok {
-		opts.Cursor = cursor
+	opts.Cursor, errResult = optString(args, "cursor", "")
+	if errResult != nil {
+		return errResult, nil
 	}
 
 	result, err := s.entity.List(ctx, namespace, opts)
@@ -1474,15 +1660,21 @@ func jsonResult(v any) (*mcp.CallToolResult, error) {
 
 func parseChunkConfig(m map[string]any) *types.ChunkConfig {
 	cfg := &types.ChunkConfig{}
-	if strategy, ok := m["strategy"].(string); ok {
-		cfg.Strategy = strategy
+	strategy, errResult := optString(m, "strategy", "")
+	if errResult != nil {
+		return cfg
 	}
-	if maxTokens, ok := m["max_tokens"].(float64); ok {
-		cfg.MaxTokens = int(maxTokens)
+	cfg.Strategy = strategy
+	maxTokens, errResult := optInt(m, "max_tokens", 0)
+	if errResult != nil {
+		return cfg
 	}
-	if overlap, ok := m["overlap"].(float64); ok {
-		cfg.Overlap = int(overlap)
+	cfg.MaxTokens = maxTokens
+	overlap, errResult := optInt(m, "overlap", 0)
+	if errResult != nil {
+		return cfg
 	}
+	cfg.Overlap = overlap
 	return cfg
 }
 

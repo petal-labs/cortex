@@ -946,3 +946,41 @@ func TestToolErrorExposesClientErrors(t *testing.T) {
 		t.Errorf("expected client error message, got: %s", msg)
 	}
 }
+
+func TestOptIntWrongType(t *testing.T) {
+	args := map[string]any{"top_k": "5"} // string instead of number
+	_, errResult := optInt(args, "top_k", 0)
+	if errResult == nil {
+		t.Fatal("expected error for string where number required")
+	}
+	if !strings.Contains(getTextContent(errResult), "must be a number") {
+		t.Errorf("expected 'must be a number' in error, got: %s", getTextContent(errResult))
+	}
+}
+
+func TestOptIntAbsent(t *testing.T) {
+	args := map[string]any{}
+	val, errResult := optInt(args, "top_k", 42)
+	if errResult != nil {
+		t.Fatalf("expected no error when absent, got: %s", getTextContent(errResult))
+	}
+	if val != 42 {
+		t.Errorf("expected default 42, got %d", val)
+	}
+}
+
+func TestOptStringPtrWrongType(t *testing.T) {
+	args := map[string]any{"run_id": 123} // number instead of string
+	_, errResult := optStringPtr(args, "run_id")
+	if errResult == nil {
+		t.Fatal("expected error for number where string required")
+	}
+}
+
+func TestOptBoolWrongType(t *testing.T) {
+	args := map[string]any{"include_summary": "yes"} // string instead of bool
+	_, errResult := optBool(args, "include_summary", false)
+	if errResult == nil {
+		t.Fatal("expected error for string where boolean required")
+	}
+}

@@ -1093,3 +1093,192 @@ func TestOptBoolWrongType(t *testing.T) {
 		t.Fatal("expected error for string where boolean required")
 	}
 }
+
+func TestValidateJSONIntPrecision(t *testing.T) {
+	t.Run("small integers accepted", func(t *testing.T) {
+		for _, v := range []any{float64(0), float64(42), float64(-12345), float64(1) * float64(1<<53)} {
+			if errResult := validateJSONIntPrecision(v, "value"); errResult != nil {
+				t.Errorf("expected %v accepted, got: %s", v, getTextContent(errResult))
+			}
+		}
+	})
+
+	t.Run("fractional floats accepted", func(t *testing.T) {
+		for _, v := range []any{3.14, -0.5, 1e10 + 0.25} {
+			if errResult := validateJSONIntPrecision(v, "value"); errResult != nil {
+				t.Errorf("expected %v accepted, got: %s", v, getTextContent(errResult))
+			}
+		}
+	})
+
+	t.Run("integer above 2^53 rejected", func(t *testing.T) {
+		// Above 2^53, float64 spacing is 2, so the smallest real decoded
+		// value above the bound is 2^53+2. (2^53+1 literally cannot exist
+		// in a float64 — it rounds to 2^53, which is accepted.)
+		const twoPow53 = float64(1) * float64(1<<53)
+		errResult := validateJSONIntPrecision(twoPow53+2, "value")
+		if errResult == nil {
+			t.Fatal("expected rejection for integer above 2^53")
+		}
+		msg := getTextContent(errResult)
+		if !strings.Contains(msg, "exceeds 2^53") || !strings.Contains(msg, "as strings") {
+			t.Errorf("expected actionable message, got: %s", msg)
+		}
+	})
+
+	t.Run("large float magnitude rejected", func(t *testing.T) {
+		// 1e20 is integer-valued in float64 — untrustworthy.
+		if errResult := validateJSONIntPrecision(1e20, "value"); errResult == nil {
+			t.Fatal("expected rejection for integer-valued 1e20")
+		}
+	})
+
+	t.Run("nested map and array paths reported", func(t *testing.T) {
+		const twoPow53 = float64(1) * float64(1<<53)
+		v := map[string]any{
+			"user": map[string]any{
+				"ids": []any{float64(1), twoPow53, twoPow53 + 2},
+			},
+		}
+		errResult := validateJSONIntPrecision(v, "value")
+		if errResult == nil {
+			t.Fatal("expected rejection for nested oversized integer")
+		}
+		msg := getTextContent(errResult)
+		if !strings.Contains(msg, "value.user.ids[2]") {
+			t.Errorf("expected precise path in message, got: %s", msg)
+		}
+	})
+
+	t.Run("non-numeric types accepted", func(t *testing.T) {
+		v := map[string]any{
+			"name": "snowflake", "big": "9007199254740993",
+			"ok": true, "nil": nil, "nested": []any{"a", 1.5},
+		}
+		if errResult := validateJSONIntPrecision(v, "value"); errResult != nil {
+			t.Errorf("expected accepted, got: %s", getTextContent(errResult))
+		}
+	})
+}
+
+func TestParseExpectedVersion(t *testing.T) {
+	t.Run("absent returns nil", func(t *testing.T) {
+		got, errResult := parseExpectedVersion(map[string]any{})
+		if errResult != nil {
+			t.Fatalf("unexpected error: %s", getTextContent(errResult))
+		}
+		if got != nil {
+			t.Errorf("expected nil, got %v", *got)
+		}
+	})
+
+	t.Run("valid version", func(t *testing.T) {
+		// JSON decoding yields float64 numbers; mirror that here.
+		got, errResult := parseExpectedVersion(map[string]any{"expected_version": float64(7)})
+		if errResult != nil {
+			t.Fatalf("unexpected error: %s", getTextContent(errResult))
+		}
+		if got == nil || *got != 7 {
+			t.Errorf("expected 7, got %v", got)
+		}
+	})
+
+	t.Run("zero and negative treated as absent", func(t *testing.T) {
+		for _, v := range []any{float64(0), float64(-3)} {
+			got, errResult := parseExpectedVersion(map[string]any{"expected_version": v})
+			if errResult != nil {
+				t.Fatalf("unexpected error: %s", getTextContent(errResult))
+			}
+			if got != nil {
+				t.Errorf("expected nil for %v, got %v", v, *got)
+			}
+		}
+	})
+
+	t.Run("fractional rejected", func(t *testing.T) {
+		_, errResult := parseExpectedVersion(map[string]any{"expected_version": 2.5})
+		if errResult == nil {
+			t.Fatal("expected rejection for fractional version")
+		}
+	})
+
+	t.Run("above 2^53 rejected", func(t *testing.T) {
+		_, errResult := parseExpectedVersion(map[string]any{"expected_version": float64(1)*float64(1<<53) + 2})
+		if errResult == nil {
+			t.Fatal("expected rejection for version above 2^53")
+		}
+	})
+
+	t.Run("non-number rejected", func(t *testing.T) {
+		_, errResult := parseExpectedVersion(map[string]any{"expected_version": "3"})
+		if errResult == nil {
+			t.Fatal("expected rejection for string version")
+		}
+	})
+}
+
+// TestContextSetRejectsPrecisionLoss verifies end to end that a context
+// value containing an integer above 2^53 is rejected with a clear error
+// instead of being silently stored with corrupted precision.
+func TestContextSetRejectsPrecisionLoss(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	const twoPow53 = float64(1) * float64(1<<53)
+	result, err := srv.handleContextSet(ctx, makeToolRequest("context_set", map[string]any{
+		"namespace": "test-ns",
+		"key":       "snowflake",
+		"value":     map[string]any{"user_id": twoPow53 + 2},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result for oversized integer")
+	}
+	msg := getTextContent(result)
+	if !strings.Contains(msg, "exceeds 2^53") {
+		t.Errorf("expected precision error, got: %s", msg)
+	}
+}
+
+// TestContextSetRoundTripsExactIntegers verifies integers within the exact
+// float64 range survive the full set/get round trip unchanged.
+func TestContextSetRoundTripsExactIntegers(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	const exact = 9007199254740992 // 2^53, exactly representable
+	if _, err := srv.handleContextSet(ctx, makeToolRequest("context_set", map[string]any{
+		"namespace": "test-ns",
+		"key":       "ids",
+		"value":     map[string]any{"max": float64(exact), "neg": float64(-exact), "small": 123456789},
+	})); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result, err := srv.handleContextGet(ctx, makeToolRequest("context_get", map[string]any{
+		"namespace": "test-ns",
+		"key":       "ids",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(result))
+	}
+
+	var resp struct {
+		Value struct {
+			Max   float64 `json:"max"`
+			Neg   float64 `json:"neg"`
+			Small float64 `json:"small"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(result)), &resp); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	if resp.Value.Max != exact || resp.Value.Neg != -exact || resp.Value.Small != 123456789 {
+		t.Errorf("round trip corrupted values: got %+v", resp.Value)
+	}
+}

@@ -31,6 +31,7 @@ type QueueProcessor struct {
 	mu       sync.Mutex
 	running  bool
 	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewQueueProcessor creates a new extraction queue processor.
@@ -62,6 +63,7 @@ func (q *QueueProcessor) Start(ctx context.Context) {
 	q.stopChan = make(chan struct{})
 	q.mu.Unlock()
 
+	q.wg.Add(1)
 	go q.run(ctx)
 }
 
@@ -85,8 +87,28 @@ func (q *QueueProcessor) IsRunning() bool {
 	return q.running
 }
 
+// Shutdown signals the processor to stop and waits for the background
+// goroutine to exit, returning an error if the timeout is exceeded.
+func (q *QueueProcessor) Shutdown(timeout time.Duration) error {
+	q.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		q.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("queue processor did not shut down within %s", timeout)
+	}
+}
+
 // run is the main processing loop.
 func (q *QueueProcessor) run(ctx context.Context) {
+	defer q.wg.Done()
 	interval := q.cfg.ExtractionInterval
 	if interval <= 0 {
 		interval = 5 * time.Second

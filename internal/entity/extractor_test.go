@@ -1,9 +1,105 @@
 package entity
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 )
+
+// TestEntityExtractionSchemaObjectRoot verifies the schema uses an object
+// root (not an array), which OpenAI-style structured output requires — an
+// array root is rejected at request time, silently killing extraction.
+func TestEntityExtractionSchemaObjectRoot(t *testing.T) {
+	var schema map[string]any
+	if err := json.Unmarshal(entityExtractionSchema.Schema, &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+
+	if schema["type"] != "object" {
+		t.Errorf("expected schema root type 'object', got %v", schema["type"])
+	}
+
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected schema root to have properties")
+	}
+	if _, ok := props["entities"]; !ok {
+		t.Error("expected schema to have an 'entities' property")
+	}
+	if entities, ok := props["entities"].(map[string]any); ok {
+		if entities["type"] != "array" {
+			t.Errorf("expected 'entities' to be an array, got %v", entities["type"])
+		}
+	}
+
+	required, ok := schema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "entities" {
+		t.Errorf("expected required: [\"entities\"], got %v", schema["required"])
+	}
+
+	if ap, ok := schema["additionalProperties"].(bool); !ok || ap {
+		t.Error("expected additionalProperties: false at schema root")
+	}
+}
+
+func TestParseStructuredEntities(t *testing.T) {
+	t.Run("parses object-wrapped response", func(t *testing.T) {
+		response := `{"entities": [
+			{"name": "Acme Corp", "type": "organization", "confidence": 0.9},
+			{"name": "Jane", "type": "person", "confidence": 0.8}
+		]}`
+
+		entities, err := parseStructuredEntities(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 2 {
+			t.Fatalf("expected 2 entities, got %d", len(entities))
+		}
+		if entities[0].Name != "Acme Corp" {
+			t.Errorf("expected 'Acme Corp', got %q", entities[0].Name)
+		}
+	})
+
+	t.Run("falls back to raw array response", func(t *testing.T) {
+		response := `[
+			{"name": "Acme Corp", "type": "organization", "confidence": 0.9}
+		]`
+
+		entities, err := parseStructuredEntities(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+	})
+
+	t.Run("falls back when entities is null", func(t *testing.T) {
+		response := `{"entities": null, "note": "model returned malformed object"}`
+		// The fallback parser finds no array and no valid single entity.
+		if _, err := parseStructuredEntities(response); err == nil {
+			t.Error("expected error for unparseable response, got nil")
+		}
+	})
+
+	t.Run("errors on garbage", func(t *testing.T) {
+		if _, err := parseStructuredEntities("not json at all"); err == nil {
+			t.Error("expected error for non-JSON response, got nil")
+		}
+	})
+
+	t.Run("markdown code block with array", func(t *testing.T) {
+		response := "```json\n[{\"name\": \"X Corp\", \"type\": \"organization\", \"confidence\": 0.9}]\n```"
+		entities, err := parseStructuredEntities(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 || entities[0].Name != "X Corp" {
+			t.Errorf("expected fallback parser to handle markdown, got %v", entities)
+		}
+	})
+}
 
 func TestParseExtractionResponse(t *testing.T) {
 	t.Run("parses valid JSON array", func(t *testing.T) {

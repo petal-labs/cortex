@@ -1445,9 +1445,9 @@ func (s *Server) handleEntitySearch(ctx context.Context, req mcp.CallToolRequest
 	opts := &entity.SearchOpts{}
 	args := req.GetArguments()
 	var errResult *mcp.CallToolResult
-	if entityType, ok := args["type"].(string); ok {
-		t := mapEntityType(entityType)
-		opts.EntityType = &t
+	opts.EntityType, errResult = parseEntityTypeArg(args)
+	if errResult != nil {
+		return errResult, nil
 	}
 	opts.TopK, errResult = optInt(args, "top_k", 0)
 	if errResult != nil {
@@ -1620,10 +1620,11 @@ func (s *Server) handleEntityList(ctx context.Context, req mcp.CallToolRequest) 
 
 	opts := &entity.ListOpts{}
 	args := req.GetArguments()
-	if entityType, ok := args["type"].(string); ok {
-		t := mapEntityType(entityType)
-		opts.EntityType = &t
+	entityType, errResult := parseEntityTypeArg(args)
+	if errResult != nil {
+		return errResult, nil
 	}
+	opts.EntityType = entityType
 	sortBy, errResult := optString(args, "sort_by", "")
 	if errResult != nil {
 		return errResult, nil
@@ -1694,26 +1695,46 @@ func toStringMap(m map[string]any) map[string]string {
 	return result
 }
 
-// mapEntityType converts FRD entity types to internal types.
-// FRD uses: person, organization, product, location, concept, event, other
-// Internal types: person, organization, product, location, concept
-func mapEntityType(frdType string) types.EntityType {
-	switch strings.ToLower(frdType) {
+// mapEntityType converts an API entity type string to the internal
+// types.EntityType. All seven advertised values (person, organization,
+// product, location, concept, event, other) are real internal types.
+// Unknown values return ok=false so callers reject them instead of
+// silently remapping to an unrelated type.
+func mapEntityType(frdType string) (types.EntityType, bool) {
+	switch strings.ToLower(strings.TrimSpace(frdType)) {
 	case "person":
-		return types.EntityTypePerson
+		return types.EntityTypePerson, true
 	case "organization":
-		return types.EntityTypeOrganization
+		return types.EntityTypeOrganization, true
 	case "product":
-		return types.EntityTypeProduct
+		return types.EntityTypeProduct, true
 	case "location":
-		return types.EntityTypeLocation
+		return types.EntityTypeLocation, true
 	case "concept":
-		return types.EntityTypeConcept
+		return types.EntityTypeConcept, true
 	case "event":
-		// Event not in internal types, use concept as closest match
-		return types.EntityTypeConcept
+		return types.EntityTypeEvent, true
+	case "other":
+		return types.EntityTypeOther, true
 	default:
-		// "other" and unknown types default to product
-		return types.EntityTypeProduct
+		return "", false
 	}
+}
+
+// parseEntityTypeArg extracts and validates the optional "type" argument,
+// returning a tool error when present but not one of the supported values.
+func parseEntityTypeArg(args map[string]any) (*types.EntityType, *mcp.CallToolResult) {
+	typeStr, errResult := optString(args, "type", "")
+	if errResult != nil {
+		return nil, errResult
+	}
+	if typeStr == "" {
+		return nil, nil
+	}
+	t, ok := mapEntityType(typeStr)
+	if !ok {
+		return nil, mcp.NewToolResultError(fmt.Sprintf(
+			"parameter \"type\" has unsupported value %q (supported: person, organization, product, location, concept, event, other)", typeStr))
+	}
+	return &t, nil
 }

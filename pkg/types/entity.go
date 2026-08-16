@@ -11,6 +11,8 @@ const (
 	EntityTypeProduct      EntityType = "product"
 	EntityTypeLocation     EntityType = "location"
 	EntityTypeConcept      EntityType = "concept"
+	EntityTypeEvent        EntityType = "event"
+	EntityTypeOther        EntityType = "other"
 )
 
 // Entity represents a named entity (person, organization, product, etc.).

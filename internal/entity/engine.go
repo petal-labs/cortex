@@ -34,6 +34,8 @@ var ValidEntityTypes = map[types.EntityType]bool{
 	types.EntityTypeProduct:      true,
 	types.EntityTypeLocation:     true,
 	types.EntityTypeConcept:      true,
+	types.EntityTypeEvent:        true,
+	types.EntityTypeOther:        true,
 }
 
 // Engine implements the entity memory logic layer.

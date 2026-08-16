@@ -17,7 +17,7 @@ import (
 // With structured output, we don't need to specify the JSON format.
 const ExtractionPrompt = `Extract all named entities from the following text. For each entity, identify:
 - name: The canonical name of the entity
-- type: Classify as "person", "organization", "product", "location", or "concept"
+- type: Classify as "person", "organization", "product", "location", "concept", "event", or "other"
 - aliases: Any alternative names or abbreviations used in the text
 - attributes: Key facts mentioned about the entity as key-value pairs
 - confidence: Your confidence in this extraction (0.0-1.0)
@@ -50,11 +50,11 @@ var entityExtractionSchema = &core.JSONSchemaDefinition{
 							"type": "string",
 							"description": "The canonical name of the entity"
 						},
-						"type": {
-							"type": "string",
-							"enum": ["person", "organization", "product", "location", "concept"],
-							"description": "The type of entity"
-						},
+					"type": {
+						"type": "string",
+						"enum": ["person", "organization", "product", "location", "concept", "event", "other"],
+						"description": "The type of entity"
+					},
 						"aliases": {
 							"type": ["array", "null"],
 							"items": {"type": "string"},
@@ -354,14 +354,10 @@ func normalizeExtractedEntity(ent *ExtractedEntity) {
 }
 
 // isValidEntityType checks if a type string is a valid entity type.
+// Uses the engine's ValidEntityTypes as the single source of truth.
 func isValidEntityType(t string) bool {
 	t = strings.ToLower(strings.TrimSpace(t))
-	switch t {
-	case "person", "organization", "product", "location", "concept":
-		return true
-	default:
-		return false
-	}
+	return ValidEntityTypes[types.EntityType(t)]
 }
 
 // extractRelationships creates relationships between co-mentioned entities.
@@ -403,7 +399,11 @@ func ToEntityType(s string) types.EntityType {
 		return types.EntityTypeLocation
 	case "concept":
 		return types.EntityTypeConcept
+	case "event":
+		return types.EntityTypeEvent
+	case "other":
+		return types.EntityTypeOther
 	default:
-		return types.EntityTypeConcept // Default to concept
+		return types.EntityTypeConcept // Unreachable for validated input
 	}
 }

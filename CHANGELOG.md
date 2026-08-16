@@ -5,10 +5,27 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-08-16
 
-Stability hardening for the 1.0 release — the 32 items of the
-[Cortex 1.0 Stability Roadmap](https://github.com/petal-labs/cortex/issues/35).
+First stable release. Cortex's storage, MCP wire contract, and public Go API
+are now covered by semantic versioning: breaking changes require a major bump.
+
+This release is the stability hardening described in the
+[Cortex 1.0 Stability Roadmap](https://github.com/petal-labs/cortex/issues/35) —
+all 32 items across its five phases.
+
+### Upgrading from 0.3.x
+
+- **MCP clients** must send string-valued `metadata`, filters, and attributes,
+  and correctly-typed tool arguments; both are now rejected rather than
+  coerced. Responses gained a `schema_version` field (currently `1`) and no
+  longer contain embedding vectors, `null` collections, or zero timestamps.
+- **Go API consumers** should note the `pkg/types` changes below.
+- **pgvector deployments** created before this release keep their existing
+  `vector(1536)` columns. Cortex now refuses to start if `embedding.dimensions`
+  disagrees with them — set it to `1536` (the default) unless you re-embed.
+- **No manual migration step.** Both backends apply pending versioned
+  migrations at startup.
 
 ### Added
 
@@ -260,7 +277,7 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
-[Unreleased]: https://github.com/petal-labs/cortex/compare/v0.3.0...HEAD
+[1.0.0]: https://github.com/petal-labs/cortex/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/petal-labs/cortex/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/petal-labs/cortex/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/petal-labs/cortex/compare/v0.1.1...v0.2.0

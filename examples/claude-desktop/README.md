@@ -17,14 +17,14 @@ Claude Desktop supports MCP servers, allowing Claude to use Cortex's memory capa
 
 ```bash
 # macOS (Apple Silicon)
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_arm64.tar.gz
-tar -xzf cortex_0.1.0_darwin_arm64.tar.gz
-sudo mv cortex_0.1.0_darwin_arm64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_arm64.tar.gz
+tar -xzf cortex_1.0.0_darwin_arm64.tar.gz
+sudo mv cortex_1.0.0_darwin_arm64/cortex /usr/local/bin/
 
 # macOS (Intel)
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_0.1.0_darwin_amd64.tar.gz
-tar -xzf cortex_0.1.0_darwin_amd64.tar.gz
-sudo mv cortex_0.1.0_darwin_amd64/cortex /usr/local/bin/
+curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.0_darwin_amd64.tar.gz
+tar -xzf cortex_1.0.0_darwin_amd64.tar.gz
+sudo mv cortex_1.0.0_darwin_amd64/cortex /usr/local/bin/
 ```
 
 ### 2. Configure Claude Desktop

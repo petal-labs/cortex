@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // runRoot executes the root command with the given args, capturing whatever
@@ -72,5 +75,45 @@ func TestSetVersionInfoPartial(t *testing.T) {
 	}
 	if strings.Contains(got, "()") {
 		t.Errorf("--version output has an empty build-info group\ngot: %s", got)
+	}
+}
+
+// TestNoFlagShorthandCollisions walks the entire command tree and triggers
+// the exact code path (persistent-flag merge during ParseFlags) that panics
+// in pflag when a subcommand's local flag shorthand collides with an
+// inherited persistent one. Such a collision makes the command crash on
+// every invocation, so any occurrence fails here with the command path.
+func TestNoFlagShorthandCollisions(t *testing.T) {
+	var failures []string
+
+	check := func(c *cobra.Command) {
+		defer func() {
+			if r := recover(); r != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", c.CommandPath(), r))
+			}
+		}()
+		// Bring the flagset to the same state as a real invocation:
+		// defaults added, inherited persistent flags merged in.
+		c.InitDefaultHelpFlag()
+		c.InitDefaultVersionFlag()
+		if err := c.ParseFlags(nil); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", c.CommandPath(), err))
+		}
+	}
+
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		if c == nil {
+			return
+		}
+		check(c)
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(rootCmd)
+
+	if len(failures) > 0 {
+		t.Errorf("flag shorthand collisions found:\n  - %s", strings.Join(failures, "\n  - "))
 	}
 }

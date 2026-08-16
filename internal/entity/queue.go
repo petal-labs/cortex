@@ -317,7 +317,7 @@ func (q *QueueProcessor) processExtractedEntity(
 		}
 	} else {
 		// Create new entity
-		result, err := q.engine.Create(ctx, namespace, extracted.Name, ToEntityType(extracted.Type), &CreateOpts{
+		result, err := q.engine.Create(ctx, namespace, extracted.Name, ToEntityType(string(extracted.Type)), &CreateOpts{
 			Aliases:    extracted.Aliases,
 			Attributes: extracted.Attributes,
 		})

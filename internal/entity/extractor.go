@@ -82,23 +82,14 @@ var entityExtractionSchema = &core.JSONSchemaDefinition{
 	}`),
 }
 
-// ExtractedEntity represents an entity extracted from text by the LLM.
-type ExtractedEntity struct {
-	Name       string            `json:"name"`
-	Type       string            `json:"type"`
-	Aliases    []string          `json:"aliases,omitempty"`
-	Attributes map[string]string `json:"attributes,omitempty"`
-	Confidence float64           `json:"confidence"`
-}
+// ExtractedEntity and ExtractedRelationship alias the canonical types in
+// pkg/types (see types.ExtractedEntity). The definitions were consolidated
+// there so the public API and the extraction pipeline share one wire shape
+// instead of drifting apart; the aliases keep the internal call sites
+// unchanged.
+type ExtractedEntity = types.ExtractedEntity
 
-// ExtractedRelationship represents a relationship between extracted entities.
-type ExtractedRelationship struct {
-	SourceName   string  `json:"source_name"`
-	TargetName   string  `json:"target_name"`
-	RelationType string  `json:"relation_type"`
-	Description  string  `json:"description,omitempty"`
-	Confidence   float64 `json:"confidence"`
-}
+type ExtractedRelationship = types.ExtractedRelationship
 
 // ExtractionResult contains the result of entity extraction.
 type ExtractionResult struct {
@@ -316,7 +307,7 @@ func validateExtractedEntity(ent *ExtractedEntity) error {
 	if strings.TrimSpace(ent.Name) == "" {
 		return fmt.Errorf("entity name is empty")
 	}
-	if !isValidEntityType(ent.Type) {
+	if !isValidEntityType(string(ent.Type)) {
 		return fmt.Errorf("invalid entity type: %s", ent.Type)
 	}
 	return nil
@@ -325,7 +316,7 @@ func validateExtractedEntity(ent *ExtractedEntity) error {
 // normalizeExtractedEntity normalizes entity fields.
 func normalizeExtractedEntity(ent *ExtractedEntity) {
 	ent.Name = strings.TrimSpace(ent.Name)
-	ent.Type = strings.ToLower(strings.TrimSpace(ent.Type))
+	ent.Type = types.EntityType(strings.ToLower(strings.TrimSpace(string(ent.Type))))
 
 	// Normalize aliases
 	normalizedAliases := make([]string, 0, len(ent.Aliases))

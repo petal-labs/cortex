@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/petal-labs/cortex/pkg/types"
 )
 
 // TestEntityExtractionSchemaObjectRoot verifies the schema uses an object
@@ -473,4 +475,62 @@ func TestExtractorExtractEmpty(t *testing.T) {
 	// We can't create an Extractor without a valid provider config,
 	// but this test verifies the behavior documented in the code
 	t.Skip("Requires provider configuration - empty input handling tested via Extract method")
+}
+
+// TestExtractedEntityCanonicalShape locks the wire shape of the canonical
+// types.ExtractedEntity/ExtractedRelationship (consolidated in P26): it must
+// match the extraction structured-output schema — name, type, aliases,
+// attributes, confidence — with confidence always emitted (schema-required)
+// and relationships carrying source_name/target_name. Any drift here breaks
+// LLM response parsing, so it fails loudly instead.
+func TestExtractedEntityCanonicalShape(t *testing.T) {
+	// Round-trip a schema-shaped LLM response through the canonical type.
+	schemaShaped := `{
+		"name": "Acme Corp",
+		"type": "organization",
+		"aliases": ["Acme"],
+		"attributes": {"industry": "tech"},
+		"confidence": 0.9
+	}`
+	var ent ExtractedEntity
+	if err := json.Unmarshal([]byte(schemaShaped), &ent); err != nil {
+		t.Fatalf("schema-shaped JSON must parse into the canonical type: %v", err)
+	}
+	if ent.Name != "Acme Corp" || string(ent.Type) != "organization" || ent.Confidence != 0.9 {
+		t.Errorf("unexpected parse: %+v", ent)
+	}
+
+	// Confidence must always be emitted (extraction schema marks it
+	// required), never omitted.
+	data, err := json.Marshal(&ExtractedEntity{Name: "X", Type: "person"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"confidence":0`) {
+		t.Errorf("confidence dropped from wire shape: %s", data)
+	}
+
+	// Aliases/attributes stay omitempty (optional in the schema).
+	if strings.Contains(string(data), "aliases") || strings.Contains(string(data), "attributes") {
+		t.Errorf("optional fields should be omitted when empty: %s", data)
+	}
+
+	// Relationship shape: source_name and target_name both present.
+	relData, err := json.Marshal(&ExtractedRelationship{
+		SourceName: "a", TargetName: "b", RelationType: "works_at", Confidence: 0.5,
+	})
+	if err != nil {
+		t.Fatalf("marshal relationship: %v", err)
+	}
+	for _, want := range []string{`"source_name":"a"`, `"target_name":"b"`, `"relation_type":"works_at"`, `"confidence":0.5`} {
+		if !strings.Contains(string(relData), want) {
+			t.Errorf("expected %s in relationship wire shape, got: %s", want, relData)
+		}
+	}
+
+	// The aliases must be the pkg/types definitions — one canonical type,
+	// not a duplicate. This assignment only compiles while ExtractedEntity
+	// remains an alias of types.ExtractedEntity.
+	var typeCheck = types.ExtractedEntity{}
+	var _ ExtractedEntity = typeCheck
 }

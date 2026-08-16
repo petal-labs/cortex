@@ -8,7 +8,7 @@ import (
 // DeleteOldConversations removes threads and their messages older than the specified duration.
 // Returns the number of threads deleted.
 func (b *Backend) DeleteOldConversations(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().Add(-olderThan).UnixMilli()
+	cutoff := time.Now().Add(-olderThan).Unix()
 
 	// First, get the count of threads to be deleted
 	var count int64

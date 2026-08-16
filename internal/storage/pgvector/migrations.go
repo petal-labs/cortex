@@ -305,9 +305,11 @@ func buildMigrationStatements(dimensions int) ([]string, error) {
 		expires_at TIMESTAMPTZ,
 		updated_by TEXT,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		UNIQUE(namespace, key, COALESCE(run_id, ''))
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_context_entries_unique
+		ON context_entries (namespace, key, COALESCE(run_id, ''))`,
 
 		`CREATE INDEX IF NOT EXISTS idx_context_namespace_key ON context_entries(namespace, key)`,
 		`CREATE INDEX IF NOT EXISTS idx_context_run ON context_entries(namespace, run_id) WHERE run_id IS NOT NULL`,
@@ -364,9 +366,11 @@ func buildMigrationStatements(dimensions int) ([]string, error) {
 		namespace TEXT NOT NULL,
 		alias TEXT NOT NULL,
 		entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		UNIQUE(namespace, LOWER(alias))
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_aliases_unique
+		ON entity_aliases (namespace, LOWER(alias))`,
 
 		`CREATE INDEX IF NOT EXISTS idx_entity_aliases_lookup ON entity_aliases(namespace, LOWER(alias))`,
 
@@ -392,6 +396,7 @@ func buildMigrationStatements(dimensions int) ([]string, error) {
 		relation_type TEXT NOT NULL,
 		description TEXT,
 		confidence REAL NOT NULL DEFAULT 1.0,
+		mention_count BIGINT NOT NULL DEFAULT 1,
 		metadata JSONB,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

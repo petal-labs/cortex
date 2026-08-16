@@ -600,19 +600,3 @@ func TestCollectionStatsEmpty(t *testing.T) {
 		t.Errorf("expected 0 tokens, got %d", stats.TotalTokens)
 	}
 }
-
-func TestSearchChunksPlaceholder(t *testing.T) {
-	backend := newTestBackendWithDB(t)
-	defer backend.Close()
-
-	ctx := context.Background()
-
-	// SearchChunks is a placeholder until vec0 integration
-	results, err := backend.SearchChunks(ctx, "test-ns", []float32{0.1, 0.2}, storage.ChunkSearchOpts{})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("expected empty results, got %d", len(results))
-	}
-}

@@ -142,19 +142,8 @@ func (b *Backend) PruneStaleEntities(ctx context.Context, staleDuration time.Dur
 // DeleteOrphanedChunks removes chunks whose parent documents no longer exist.
 // Returns the number of chunks deleted.
 func (b *Backend) DeleteOrphanedChunks(ctx context.Context) (int64, error) {
-	// First delete chunk embeddings for orphaned chunks
-	_, err := b.pool.Exec(ctx,
-		`DELETE FROM chunk_embeddings WHERE chunk_id IN (
-			SELECT c.id FROM chunks c
-			LEFT JOIN documents d ON c.document_id = d.id
-			WHERE d.id IS NULL
-		)`,
-	)
-	if err != nil {
-		return 0, err
-	}
-
-	// Delete orphaned chunks
+	// pgvector stores embeddings inline in the chunks table, so there is no
+	// separate chunk_embeddings table to clean up — just delete the chunks.
 	result, err := b.pool.Exec(ctx,
 		`DELETE FROM chunks WHERE document_id NOT IN (SELECT id FROM documents)`,
 	)

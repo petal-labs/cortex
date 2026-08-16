@@ -498,9 +498,6 @@ func (b *Backend) MergeEntities(ctx context.Context, namespace, sourceID, target
 
 // InsertMention records a mention of an entity in source content.
 func (b *Backend) InsertMention(ctx context.Context, mention *types.EntityMention) error {
-	if mention.ID == "" {
-		mention.ID = uuid.New().String()
-	}
 	if mention.CreatedAt.IsZero() {
 		mention.CreatedAt = time.Now().UTC()
 	}
@@ -511,12 +508,14 @@ func (b *Backend) InsertMention(ctx context.Context, mention *types.EntityMentio
 	}
 	defer tx.Rollback(ctx)
 
-	// Insert mention (without confidence - field doesn't exist on type)
-	_, err = tx.Exec(ctx, `
-		INSERT INTO entity_mentions (id, entity_id, namespace, source_type, source_id, context, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, mention.ID, mention.EntityID, mention.Namespace, mention.SourceType,
-		mention.SourceID, mention.Context, mention.CreatedAt)
+	// Insert mention — id is SERIAL (auto-generated), so omit it and use
+	// RETURNING to populate the generated ID back onto the struct.
+	err = tx.QueryRow(ctx, `
+		INSERT INTO entity_mentions (entity_id, namespace, source_type, source_id, context, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, mention.EntityID, mention.Namespace, mention.SourceType,
+		mention.SourceID, mention.Context, mention.CreatedAt).Scan(&mention.ID)
 	if err != nil {
 		return fmt.Errorf("failed to insert mention: %w", err)
 	}
@@ -596,17 +595,18 @@ func (b *Backend) UpsertRelationship(ctx context.Context, rel *types.EntityRelat
 		rel.Confidence = 1.0
 	}
 
-	// Use ON CONFLICT for upsert (without metadata - field doesn't exist on type)
+	// Use ON CONFLICT for upsert — increment mention_count on conflict.
 	_, err := b.pool.Exec(ctx, `
 		INSERT INTO entity_relationships
-			(id, namespace, source_entity_id, target_entity_id, relation_type, description, confidence, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(id, namespace, source_entity_id, target_entity_id, relation_type, description, confidence, mention_count, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (namespace, source_entity_id, target_entity_id, relation_type) DO UPDATE SET
 			description = EXCLUDED.description,
 			confidence = EXCLUDED.confidence,
+			mention_count = entity_relationships.mention_count + 1,
 			updated_at = EXCLUDED.updated_at
 	`, rel.ID, rel.Namespace, rel.SourceEntityID, rel.TargetEntityID, rel.RelationType,
-		rel.Description, rel.Confidence, rel.FirstSeenAt, rel.LastSeenAt)
+		rel.Description, rel.Confidence, rel.MentionCount, rel.FirstSeenAt, rel.LastSeenAt)
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert relationship: %w", err)
@@ -648,7 +648,7 @@ func (b *Backend) GetRelationships(ctx context.Context, namespace, entityID stri
 
 	query := `
 		SELECT id, namespace, source_entity_id, target_entity_id, relation_type,
-		       description, confidence, created_at, updated_at
+		       description, confidence, mention_count, created_at, updated_at
 		FROM entity_relationships
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY updated_at DESC
@@ -667,7 +667,7 @@ func (b *Backend) GetRelationships(ctx context.Context, namespace, entityID stri
 
 		if err := rows.Scan(
 			&rel.ID, &rel.Namespace, &rel.SourceEntityID, &rel.TargetEntityID,
-			&rel.RelationType, &description, &rel.Confidence,
+			&rel.RelationType, &description, &rel.Confidence, &rel.MentionCount,
 			&rel.FirstSeenAt, &rel.LastSeenAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan relationship: %w", err)

@@ -43,43 +43,33 @@ Cortex is a memory and knowledge service for AI agents. It provides persistent c
 
 ### Download Binary
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/petal-labs/cortex/releases/latest).
+Prebuilt binaries are published for Linux (amd64, arm64), macOS (amd64,
+arm64), and Windows (amd64) on the
+[releases page](https://github.com/petal-labs/cortex/releases/latest).
 
-**Linux (amd64):**
-
-```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_linux_amd64.tar.gz
-tar -xzf cortex_1.0.1_linux_amd64.tar.gz
-sudo mv cortex_1.0.1_linux_amd64/cortex /usr/local/bin/
-```
-
-**Linux (arm64):**
+On Linux and macOS, this resolves the current release and your platform
+automatically:
 
 ```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_linux_arm64.tar.gz
-tar -xzf cortex_1.0.1_linux_arm64.tar.gz
-sudo mv cortex_1.0.1_linux_arm64/cortex /usr/local/bin/
+VERSION=$(curl -sI https://github.com/petal-labs/cortex/releases/latest | awk -F'/v' '/^[Ll]ocation:/ {print $2}' | tr -d '\r')
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+[ "$ARCH" = "x86_64" ] && ARCH=amd64
+[ "$ARCH" = "aarch64" ] && ARCH=arm64
+
+curl -LO "https://github.com/petal-labs/cortex/releases/latest/download/cortex_${VERSION}_${OS}_${ARCH}.tar.gz"
+tar -xzf "cortex_${VERSION}_${OS}_${ARCH}.tar.gz"
+sudo mv "cortex_${VERSION}_${OS}_${ARCH}/cortex" /usr/local/bin/
 ```
 
-**macOS (Apple Silicon):**
-
-```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_darwin_arm64.tar.gz
-tar -xzf cortex_1.0.1_darwin_arm64.tar.gz
-sudo mv cortex_1.0.1_darwin_arm64/cortex /usr/local/bin/
-```
-
-**macOS (Intel):**
-
-```bash
-curl -LO https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_darwin_amd64.tar.gz
-tar -xzf cortex_1.0.1_darwin_amd64.tar.gz
-sudo mv cortex_1.0.1_darwin_amd64/cortex /usr/local/bin/
-```
+`/releases/latest` redirects to the current tag, so `VERSION` tracks whatever
+is newest without this page needing an edit each release.
 
 **Windows:**
 
-Download `cortex_1.0.1_windows_amd64.zip` from [releases](https://github.com/petal-labs/cortex/releases/latest), extract, and add to your PATH.
+Download the `cortex_<version>_windows_amd64.zip` asset from the
+[latest release](https://github.com/petal-labs/cortex/releases/latest),
+extract it, and add the extracted folder to your PATH.
 
 ### Build from Source
 

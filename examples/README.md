@@ -18,15 +18,16 @@ This directory contains examples demonstrating how to use Cortex in various scen
 Before running these examples, ensure Cortex is installed:
 
 ```bash
-# Download from releases
+# Resolve the current release and this platform
+VERSION=$(curl -sI https://github.com/petal-labs/cortex/releases/latest | awk -F'/v' '/^[Ll]ocation:/ {print $2}' | tr -d '\r')
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 [ "$ARCH" = "x86_64" ] && ARCH=amd64
 [ "$ARCH" = "aarch64" ] && ARCH=arm64
 
-curl -LO "https://github.com/petal-labs/cortex/releases/latest/download/cortex_1.0.1_${OS}_${ARCH}.tar.gz"
-tar -xzf cortex_*.tar.gz
-sudo mv cortex_*/cortex /usr/local/bin/
+curl -LO "https://github.com/petal-labs/cortex/releases/latest/download/cortex_${VERSION}_${OS}_${ARCH}.tar.gz"
+tar -xzf "cortex_${VERSION}_${OS}_${ARCH}.tar.gz"
+sudo mv "cortex_${VERSION}_${OS}_${ARCH}/cortex" /usr/local/bin/
 
 # Verify installation
 cortex --version

@@ -958,40 +958,162 @@ func TestEntitySearchTypeFilterNotRemapped(t *testing.T) {
 }
 
 func TestToStringMap(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    map[string]any
-		expected map[string]string
-	}{
-		{
-			name:     "string values",
-			input:    map[string]any{"a": "hello", "b": "world"},
-			expected: map[string]string{"a": "hello", "b": "world"},
-		},
-		{
-			name:     "mixed types",
-			input:    map[string]any{"s": "str", "n": 42, "b": true},
-			expected: map[string]string{"s": "str", "n": "42", "b": "true"},
-		},
-		{
-			name:     "empty map",
-			input:    map[string]any{},
-			expected: map[string]string{},
-		},
-	}
+	t.Run("string values accepted", func(t *testing.T) {
+		input := map[string]any{"a": "hello", "b": "world"}
+		result, errResult := toStringMap(input, "metadata")
+		if errResult != nil {
+			t.Fatalf("unexpected error: %s", getTextContent(errResult))
+		}
+		if result["a"] != "hello" || result["b"] != "world" {
+			t.Errorf("expected strings preserved, got %v", result)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := toStringMap(tt.input)
-			if len(result) != len(tt.expected) {
-				t.Errorf("length mismatch: got %d, want %d", len(result), len(tt.expected))
+	t.Run("empty map accepted", func(t *testing.T) {
+		result, errResult := toStringMap(map[string]any{}, "metadata")
+		if errResult != nil {
+			t.Fatalf("unexpected error: %s", getTextContent(errResult))
+		}
+		if len(result) != 0 {
+			t.Errorf("expected empty result, got %v", result)
+		}
+	})
+
+	rejections := []struct {
+		name  string
+		value any
+	}{
+		{"number value", float64(3)},
+		{"bool value", true},
+		{"array value", []any{"a"}},
+		{"object value", map[string]any{"x": "y"}},
+		{"null value", nil},
+	}
+	for _, tc := range rejections {
+		t.Run(tc.name+" rejected", func(t *testing.T) {
+			_, errResult := toStringMap(map[string]any{"count": tc.value}, "metadata")
+			if errResult == nil {
+				t.Fatal("expected rejection for non-string value, got nil")
 			}
-			for k, v := range tt.expected {
-				if result[k] != v {
-					t.Errorf("key %q: got %q, want %q", k, result[k], v)
+			msg := getTextContent(errResult)
+			for _, want := range []string{
+				`"metadata" values must be strings`, `"count"`,
+			} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("expected %q in message, got: %s", want, msg)
 				}
 			}
 		})
+	}
+}
+
+// TestMetadataRejectsNonStringValues verifies end to end that ingest paths
+// reject a non-string metadata value with an actionable error instead of
+// silently stringifying it ({"count":3} previously became {"count":"3"}).
+func TestMetadataRejectsNonStringValues(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	t.Run("conversation_append", func(t *testing.T) {
+		result, err := srv.handleConversationAppend(ctx, makeToolRequest("conversation_append", map[string]any{
+			"namespace": "test-ns",
+			"thread_id": "thread-1",
+			"role":      "user",
+			"content":   "hi",
+			"metadata":  map[string]any{"count": float64(3)},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for number metadata value")
+		}
+		if msg := getTextContent(result); !strings.Contains(msg, "must be strings") {
+			t.Errorf("expected string-only message, got: %s", msg)
+		}
+	})
+
+	t.Run("knowledge_bulk_ingest per-document context", func(t *testing.T) {
+		result, err := srv.handleKnowledgeBulkIngest(ctx, makeToolRequest("knowledge_bulk_ingest", map[string]any{
+			"namespace":     "test-ns",
+			"collection_id": "col",
+			"documents": []any{
+				map[string]any{"content": "ok doc", "metadata": map[string]any{"src": "web"}},
+				map[string]any{"content": "bad doc", "metadata": map[string]any{"count": float64(3)}},
+			},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result")
+		}
+		if msg := getTextContent(result); !strings.Contains(msg, "document 1") || !strings.Contains(msg, "must be strings") {
+			t.Errorf("expected per-document message, got: %s", msg)
+		}
+	})
+}
+
+// TestMetadataStringRoundTrip verifies string metadata still round-trips
+// and filters still match on exact string equality.
+func TestMetadataStringRoundTrip(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Create the collection first.
+	created, err := srv.handleKnowledgeCollections(ctx, makeToolRequest("knowledge_collections", map[string]any{
+		"namespace": "test-ns",
+		"action":    "create",
+		"name":      "meta-test",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if created.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(created))
+	}
+	var col struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(created)), &col); err != nil {
+		t.Fatalf("parse collection: %v", err)
+	}
+
+	// Ingest with string-only metadata, including a number sent as string.
+	ingest, err := srv.handleKnowledgeIngest(ctx, makeToolRequest("knowledge_ingest", map[string]any{
+		"namespace":     "test-ns",
+		"collection_id": col.ID,
+		"content":       "Some document content about testing metadata filters.",
+		"metadata":      map[string]any{"count": "3", "src": "web"},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ingest.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(ingest))
+	}
+
+	// Filter with the same string values — must match.
+	search, err := srv.handleKnowledgeSearch(ctx, makeToolRequest("knowledge_search", map[string]any{
+		"namespace": "test-ns",
+		"query":     "metadata filters",
+		"filters":   map[string]any{"count": "3"},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if search.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(search))
+	}
+
+	var resp struct {
+		TotalFound int `json:"total_found"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(search)), &resp); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if resp.TotalFound != 1 {
+		t.Errorf("expected filter to match the ingested chunk, got total_found=%d", resp.TotalFound)
 	}
 }
 

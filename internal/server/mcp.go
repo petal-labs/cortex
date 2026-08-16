@@ -4,17 +4,22 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"go.uber.org/zap"
 
 	ctxengine "github.com/petal-labs/cortex/internal/context"
 	"github.com/petal-labs/cortex/internal/conversation"
+	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/entity"
 	"github.com/petal-labs/cortex/internal/knowledge"
+	"github.com/petal-labs/cortex/internal/observability"
+	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
 )
 
@@ -593,6 +598,56 @@ func (s *Server) registerEntityTools() {
 
 // Tool handlers
 
+// clientErrors are sentinel errors that are safe to expose to MCP clients
+// because they describe client-side problems (bad input, not found, etc.)
+// rather than internal server details.
+var clientErrors = []error{
+	storage.ErrNotFound,
+	storage.ErrAlreadyExists,
+	storage.ErrVersionConflict,
+	conversation.ErrEmptyContent,
+	conversation.ErrInvalidRole,
+	conversation.ErrThreadNotFound,
+	conversation.ErrNothingToSummarize,
+	conversation.ErrSummarizerNotSet,
+	knowledge.ErrEmptyContent,
+	knowledge.ErrCollectionNotFound,
+	knowledge.ErrDocumentNotFound,
+	knowledge.ErrCollectionExists,
+	knowledge.ErrEmbeddingRequired,
+	knowledge.ErrEmbeddingFailed,
+	knowledge.ErrInvalidChunkConfig,
+	entity.ErrEntityNotFound,
+	entity.ErrEmptyName,
+	entity.ErrInvalidType,
+	entity.ErrSelfMerge,
+	entity.ErrEmbeddingRequired,
+	entity.ErrEmptyQuery,
+	entity.ErrEmptySourceID,
+	ctxengine.ErrKeyNotFound,
+	ctxengine.ErrVersionConflict,
+	ctxengine.ErrInvalidMerge,
+	ctxengine.ErrEmptyKey,
+	embedding.ErrEmptyInput,
+	embedding.ErrBatchTooLarge,
+}
+
+// toolError classifies an error from an engine or storage operation. If the
+// error matches a known client-facing sentinel, its message is returned to
+// the caller. Otherwise the error is logged server-side and a sanitized
+// "internal server error" is returned, preventing SQL, URLs, and other
+// internal details from leaking to MCP clients.
+func toolError(err error) (*mcp.CallToolResult, error) {
+	for _, sentinel := range clientErrors {
+		if errors.Is(err, sentinel) {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+	}
+	observability.Error(context.Background(), "internal error in MCP tool handler",
+		zap.Error(err))
+	return mcp.NewToolResultError("internal server error"), nil
+}
+
 func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	namespace, err := req.RequireString("namespace")
 	if err != nil {
@@ -631,7 +686,7 @@ func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolR
 
 	result, err := s.conversation.Append(ctx, namespace, threadID, role, content, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -667,7 +722,7 @@ func (s *Server) handleConversationHistory(ctx context.Context, req mcp.CallTool
 
 	result, err := s.conversation.History(ctx, namespace, threadID, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -707,7 +762,7 @@ func (s *Server) handleConversationSearch(ctx context.Context, req mcp.CallToolR
 
 	result, err := s.conversation.Search(ctx, namespace, query, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -735,7 +790,7 @@ func (s *Server) handleConversationSummarize(ctx context.Context, req mcp.CallTo
 
 	result, err := s.conversation.Summarize(ctx, namespace, threadID, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -784,7 +839,7 @@ func (s *Server) handleKnowledgeIngest(ctx context.Context, req mcp.CallToolRequ
 
 	result, err := s.knowledge.Ingest(ctx, namespace, collectionID, content, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -854,7 +909,7 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 
 	result, err := s.knowledge.Search(ctx, namespace, query, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -878,7 +933,7 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 	case "list":
 		collections, nextCursor, err := s.knowledge.ListCollections(ctx, namespace, "", 0)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return toolError(err)
 		}
 		return jsonResult(map[string]any{
 			"collections": collections,
@@ -903,7 +958,7 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 
 		result, err := s.knowledge.CreateCollection(ctx, namespace, opts)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return toolError(err)
 		}
 		return jsonResult(result)
 
@@ -915,7 +970,7 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 
 		err := s.knowledge.DeleteCollection(ctx, namespace, collectionID)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return toolError(err)
 		}
 		return jsonResult(map[string]any{"deleted": true})
 
@@ -998,7 +1053,7 @@ func (s *Server) handleKnowledgeBulkIngest(ctx context.Context, req mcp.CallTool
 
 	result, err := s.knowledge.BulkIngest(ctx, namespace, collectionID, documents, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1025,7 +1080,7 @@ func (s *Server) handleContextGet(ctx context.Context, req mcp.CallToolRequest) 
 
 	result, err := s.context.Get(ctx, namespace, key, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1064,7 +1119,7 @@ func (s *Server) handleContextSet(ctx context.Context, req mcp.CallToolRequest) 
 
 	result, err := s.context.Set(ctx, namespace, key, value, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1103,7 +1158,7 @@ func (s *Server) handleContextMerge(ctx context.Context, req mcp.CallToolRequest
 
 	result, err := s.context.Merge(ctx, namespace, key, value, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1134,7 +1189,7 @@ func (s *Server) handleContextList(ctx context.Context, req mcp.CallToolRequest)
 
 	result, err := s.context.List(ctx, namespace, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1167,7 +1222,7 @@ func (s *Server) handleContextHistory(ctx context.Context, req mcp.CallToolReque
 
 	result, err := s.context.History(ctx, namespace, key, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1199,7 +1254,7 @@ func (s *Server) handleEntityQuery(ctx context.Context, req mcp.CallToolRequest)
 
 	result, err := s.entity.Query(ctx, namespace, name, mentionLimit)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1247,7 +1302,7 @@ func (s *Server) handleEntitySearch(ctx context.Context, req mcp.CallToolRequest
 
 	result, err := s.entity.Search(ctx, namespace, query, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1270,7 +1325,7 @@ func (s *Server) handleEntityRelationships(ctx context.Context, req mcp.CallTool
 	// First resolve the entity name to get entity ID
 	ent, err := s.entity.Resolve(ctx, namespace, entityName)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	opts := &entity.GetRelationshipsOpts{}
@@ -1283,7 +1338,7 @@ func (s *Server) handleEntityRelationships(ctx context.Context, req mcp.CallTool
 
 	result, err := s.entity.GetRelationships(ctx, namespace, ent.ID, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1306,7 +1361,7 @@ func (s *Server) handleEntityUpdate(ctx context.Context, req mcp.CallToolRequest
 	// First resolve the entity name to get entity ID
 	ent, err := s.entity.Resolve(ctx, namespace, entityName)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	// Build update options
@@ -1318,7 +1373,7 @@ func (s *Server) handleEntityUpdate(ctx context.Context, req mcp.CallToolRequest
 	// Update the entity
 	result, err := s.entity.Update(ctx, namespace, ent.ID, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	// Add aliases if provided
@@ -1369,7 +1424,7 @@ func (s *Server) handleEntityMerge(ctx context.Context, req mcp.CallToolRequest)
 
 	result, err := s.entity.Merge(ctx, namespace, source.ID, target.ID)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)
@@ -1401,7 +1456,7 @@ func (s *Server) handleEntityList(ctx context.Context, req mcp.CallToolRequest) 
 
 	result, err := s.entity.List(ctx, namespace, opts)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolError(err)
 	}
 
 	return jsonResult(result)

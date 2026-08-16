@@ -93,8 +93,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		queueStats := &queueStatsAdapter{store: store}
 		observability.InitMetrics(queueStats)
 
-		// Start metrics server
-		metricsServer = observability.NewMetricsServer(cfg.Server.MetricsPort)
+		// Start metrics server; /ready probes the storage backend so
+		// orchestrators can hold traffic until it is reachable.
+		metricsServer = observability.NewMetricsServer(cfg.Server.MetricsPort, store.Health)
 		metricsServer.Start()
 	}
 

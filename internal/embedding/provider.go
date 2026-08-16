@@ -30,23 +30,3 @@ type Provider interface {
 	// Close releases any resources held by the provider.
 	Close() error
 }
-
-// EmbeddingRequest represents a request to generate embeddings.
-type EmbeddingRequest struct {
-	Provider string   `json:"provider"` // e.g., "openai", "anthropic", "cohere"
-	Model    string   `json:"model"`    // e.g., "text-embedding-3-small"
-	Input    []string `json:"input"`    // Text inputs to embed
-}
-
-// EmbeddingResponse represents the response from an embedding request.
-type EmbeddingResponse struct {
-	Embeddings [][]float32 `json:"embeddings"` // One embedding per input
-	Model      string      `json:"model"`      // Model used
-	Usage      UsageInfo   `json:"usage"`      // Token usage information
-}
-
-// UsageInfo contains token usage information for billing/monitoring.
-type UsageInfo struct {
-	PromptTokens int `json:"prompt_tokens"`
-	TotalTokens  int `json:"total_tokens"`
-}

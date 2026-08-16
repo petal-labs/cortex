@@ -149,6 +149,7 @@ type ExtractionQueueItem struct {
 	Attempts    int        `json:"attempts"`
 	CreatedAt   time.Time  `json:"created_at"`
 	ProcessedAt *time.Time `json:"processed_at,omitempty"`
+	NextRetryAt *time.Time `json:"next_retry_at,omitempty"` // Earliest eligible dequeue time after a failed attempt
 }
 
 // ExtractedEntity represents an entity extracted by the LLM.

@@ -326,6 +326,18 @@ SELECT rowid, id, namespace, name, COALESCE(summary, '') FROM entities;
 INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', '2');
 `,
 	},
+	{
+		Version: 3,
+		Name:    "extraction_queue_backoff",
+		Up: `
+-- Track earliest eligible retry time for failed extraction attempts.
+-- NULL (or a past time) means the item is immediately eligible for dequeue.
+ALTER TABLE entity_extraction_queue ADD COLUMN next_retry_at INTEGER;
+
+-- Update schema version
+INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', '3');
+`,
+	},
 }
 
 // runMigrations executes all pending migrations.

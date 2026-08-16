@@ -34,6 +34,16 @@ func buildMigrations(dimensions int) ([]Migration, error) {
 			Name:    "initial_schema",
 			Up:      statements,
 		},
+		{
+			Version: 2,
+			Name:    "extraction_queue_backoff",
+			Up: []string{
+				// Track earliest eligible retry time for failed extraction
+				// attempts. NULL (or a past time) means immediately
+				// eligible for dequeue.
+				`ALTER TABLE extraction_queue ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ`,
+			},
+		},
 	}, nil
 }
 

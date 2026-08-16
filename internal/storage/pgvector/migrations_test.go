@@ -101,8 +101,8 @@ func TestBuildMigrations_InitialSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(migrations) != 1 {
-		t.Fatalf("expected 1 migration, got %d", len(migrations))
+	if len(migrations) != 2 {
+		t.Fatalf("expected 2 migrations, got %d", len(migrations))
 	}
 	m := migrations[0]
 	if m.Version != 1 {
@@ -126,6 +126,17 @@ func TestBuildMigrations_InitialSchema(t *testing.T) {
 		if stmt != want[i] {
 			t.Errorf("statement %d differs from buildMigrationStatements output", i)
 		}
+	}
+
+	backoff := migrations[1]
+	if backoff.Version != 2 {
+		t.Errorf("expected version 2, got %d", backoff.Version)
+	}
+	if backoff.Name != "extraction_queue_backoff" {
+		t.Errorf("expected name extraction_queue_backoff, got %q", backoff.Name)
+	}
+	if len(backoff.Up) == 0 {
+		t.Error("expected non-empty Up statements for backoff migration")
 	}
 }
 

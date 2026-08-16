@@ -2,6 +2,7 @@ package entity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/petal-labs/iris/core"
 
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/storage"
@@ -160,8 +163,13 @@ func (q *QueueProcessor) processBatch(ctx context.Context) {
 	for _, item := range items {
 		select {
 		case <-ctx.Done():
+			// Shutdown: return the not-yet-attempted items to the queue
+			// without counting a failure, so they are not stranded in
+			// 'processing' forever.
+			q.requeueRemaining(context.Background(), item, items)
 			return
 		case <-q.stopChan:
+			q.requeueRemaining(context.Background(), item, items)
 			return
 		default:
 		}
@@ -171,6 +179,26 @@ func (q *QueueProcessor) processBatch(ctx context.Context) {
 			q.handleFailure(ctx, item, err)
 		} else {
 			q.handleSuccess(ctx, item)
+		}
+	}
+}
+
+// requeueRemaining returns the given item and every item after it in the
+// batch to the pending state without counting a failure. Used when the
+// processor stops mid-batch.
+func (q *QueueProcessor) requeueRemaining(ctx context.Context, current *types.ExtractionQueueItem, items []*types.ExtractionQueueItem) {
+	requeueCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	started := false
+	for _, item := range items {
+		if item == current {
+			started = true
+		}
+		if !started {
+			continue
+		}
+		if err := q.storage.RequeueExtraction(requeueCtx, item.ID, time.Time{}, false); err != nil {
+			log.Printf("failed to requeue item %d during shutdown: %v", item.ID, err)
 		}
 	}
 }
@@ -350,7 +378,34 @@ func (q *QueueProcessor) handleSuccess(ctx context.Context, item *types.Extracti
 
 // handleFailure handles a failed extraction attempt.
 func (q *QueueProcessor) handleFailure(ctx context.Context, item *types.ExtractionQueueItem, processErr error) {
+	// Shutdown is not a failed attempt: put the item straight back without
+	// counting it, using a fresh context since the processor's ctx is the
+	// thing that was canceled.
+	if errors.Is(processErr, context.Canceled) {
+		requeueCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := q.storage.RequeueExtraction(requeueCtx, item.ID, time.Time{}, false); err != nil {
+			log.Printf("failed to requeue item %d during shutdown: %v", item.ID, err)
+		}
+		return
+	}
+
 	item.Attempts++
+
+	// Permanent failures (bad API key, malformed request, decode errors)
+	// will never succeed on retry — dead-letter immediately instead of
+	// burning maxAttempts against the provider.
+	if isNonRetryableError(processErr) {
+		status := "dead_letter"
+		if q.cfg.ExtractionDeadLetterPolicy == "drop" {
+			status = "dropped"
+		}
+		log.Printf("extraction failed with non-retryable error, dead-lettering item %d: %v", item.ID, processErr)
+		if err := q.storage.CompleteExtraction(context.Background(), item.ID, status); err != nil {
+			log.Printf("failed to mark as dead letter: %v", err)
+		}
+		return
+	}
 
 	maxAttempts := q.cfg.ExtractionMaxAttempts
 	if maxAttempts <= 0 {
@@ -364,19 +419,35 @@ func (q *QueueProcessor) handleFailure(ctx context.Context, item *types.Extracti
 			status = "dropped"
 		}
 
-		if err := q.storage.CompleteExtraction(ctx, item.ID, status); err != nil {
+		if err := q.storage.CompleteExtraction(context.Background(), item.ID, status); err != nil {
 			log.Printf("failed to mark as dead letter: %v", err)
 		}
 		return
 	}
 
-	// Calculate backoff delay
+	// Persist the backoff so the item is genuinely ineligible until
+	// next_retry_at elapses; without this the item stayed in 'processing'
+	// forever and the retry never happened.
 	delay := q.calculateBackoff(item.Attempts)
-
-	// Re-enqueue with updated attempt count and next retry time
-	// For now, just log - the item will be retried on next dequeue
+	requeueCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := q.storage.RequeueExtraction(requeueCtx, item.ID, time.Now().UTC().Add(delay), true); err != nil {
+		log.Printf("failed to requeue item %d for retry: %v", item.ID, err)
+		return
+	}
 	log.Printf("extraction failed (attempt %d/%d), will retry after %v: %v",
 		item.Attempts, maxAttempts, delay, processErr)
+}
+
+// isNonRetryableError reports whether an extraction error is permanent:
+// retrying would produce the same outcome, so the item should go straight
+// to the dead letter queue. Covers iris's non-retryable sentinels (auth,
+// request shape, decoding) which survive error wrapping.
+func isNonRetryableError(err error) bool {
+	return errors.Is(err, core.ErrUnauthorized) ||
+		errors.Is(err, core.ErrBadRequest) ||
+		errors.Is(err, core.ErrDecode) ||
+		errors.Is(err, core.ErrNotSupported)
 }
 
 // calculateBackoff calculates the backoff delay for a retry.

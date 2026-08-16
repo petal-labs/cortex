@@ -3,9 +3,13 @@ package entity
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/petal-labs/iris/core"
 
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/storage/sqlite"
@@ -337,5 +341,145 @@ func TestQueueProcessorShutdown(t *testing.T) {
 
 	if processor.IsRunning() {
 		t.Error("expected processor to not be running after shutdown")
+	}
+}
+
+// enqueueTestItem enqueues and dequeues a single item so it is in the
+// 'processing' state with one attempt counted, mirroring the real flow.
+func enqueueTestItem(t *testing.T, backend *sqlite.Backend, sourceID string) *types.ExtractionQueueItem {
+	t.Helper()
+	ctx := context.Background()
+	if err := backend.EnqueueExtraction(ctx, &types.ExtractionQueueItem{
+		Namespace:  "test-ns",
+		SourceType: "conversation",
+		SourceID:   sourceID,
+		Content:    "content",
+	}); err != nil {
+		t.Fatalf("failed to enqueue: %v", err)
+	}
+	items, err := backend.DequeueExtraction(ctx, 1)
+	if err != nil {
+		t.Fatalf("failed to dequeue: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 dequeued item, got %d", len(items))
+	}
+	return items[0]
+}
+
+// queueAttempts reads the attempts column directly for assertions.
+func queueAttempts(t *testing.T, backend *sqlite.Backend, itemID int64) int {
+	t.Helper()
+	var attempts int
+	if err := backend.DB().QueryRowContext(context.Background(),
+		"SELECT attempts FROM entity_extraction_queue WHERE id = ?", itemID,
+	).Scan(&attempts); err != nil {
+		t.Fatalf("failed to read attempts: %v", err)
+	}
+	return attempts
+}
+
+func TestQueueProcessorBackoffRequeues(t *testing.T) {
+	processor, _, backend := setupTestQueueProcessor(t)
+	defer backend.Close()
+	ctx := context.Background()
+
+	item := enqueueTestItem(t, backend, "msg-backoff")
+
+	processor.handleFailure(ctx, item, errors.New("transient provider blip"))
+
+	// The item must be back in pending with a future next_retry_at...
+	stats, err := backend.GetExtractionQueueStats(ctx)
+	if err != nil {
+		t.Fatalf("failed to get stats: %v", err)
+	}
+	if stats.PendingCount != 1 || stats.ProcessingCount != 0 {
+		t.Fatalf("expected item requeued to pending, got pending=%d processing=%d", stats.PendingCount, stats.ProcessingCount)
+	}
+
+	// ...so an immediate dequeue does NOT return it.
+	items, err := backend.DequeueExtraction(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to dequeue: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no eligible items during backoff, got %d", len(items))
+	}
+
+	// The failed attempt is counted.
+	if got := queueAttempts(t, backend, item.ID); got != 1 {
+		t.Errorf("expected 1 recorded attempt, got %d", got)
+	}
+
+	// Once the backoff elapses, the item is eligible again.
+	if _, err := backend.DB().ExecContext(ctx,
+		"UPDATE entity_extraction_queue SET next_retry_at = ? WHERE id = ?",
+		time.Now().Add(-time.Second).Unix(), item.ID,
+	); err != nil {
+		t.Fatalf("failed to age out backoff: %v", err)
+	}
+	items, err = backend.DequeueExtraction(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to dequeue: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 eligible item after backoff, got %d", len(items))
+	}
+}
+
+func TestQueueProcessorNonRetryableDeadLetters(t *testing.T) {
+	processor, _, backend := setupTestQueueProcessor(t)
+	defer backend.Close()
+	ctx := context.Background()
+
+	item := enqueueTestItem(t, backend, "msg-badkey")
+
+	// A bad API key is permanent — wrapped the way processItem wraps it.
+	permErr := fmt.Errorf("extraction failed: %w", core.ErrUnauthorized)
+	processor.handleFailure(ctx, item, permErr)
+
+	stats, err := backend.GetExtractionQueueStats(ctx)
+	if err != nil {
+		t.Fatalf("failed to get stats: %v", err)
+	}
+	if stats.DeadLetterCount != 1 {
+		t.Fatalf("expected non-retryable failure to dead-letter immediately, got dead_letter=%d", stats.DeadLetterCount)
+	}
+	if stats.PendingCount != 0 {
+		t.Errorf("expected no requeue for permanent error, got pending=%d", stats.PendingCount)
+	}
+}
+
+func TestQueueProcessorCancelRequeuesWithoutAttempt(t *testing.T) {
+	processor, _, backend := setupTestQueueProcessor(t)
+	defer backend.Close()
+
+	item := enqueueTestItem(t, backend, "msg-shutdown")
+
+	// Simulate the processor's context being canceled mid-extraction.
+	procCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	processor.handleFailure(procCtx, item, context.Canceled)
+
+	stats, err := backend.GetExtractionQueueStats(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get stats: %v", err)
+	}
+	if stats.PendingCount != 1 || stats.ProcessingCount != 0 {
+		t.Fatalf("expected item requeued to pending on shutdown, got pending=%d processing=%d", stats.PendingCount, stats.ProcessingCount)
+	}
+
+	// The shutdown must not count as a failed attempt.
+	if got := queueAttempts(t, backend, item.ID); got != 0 {
+		t.Errorf("expected 0 attempts after shutdown requeue, got %d", got)
+	}
+
+	// And the item is immediately eligible.
+	items, err := backend.DequeueExtraction(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("failed to dequeue: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 immediately eligible item, got %d", len(items))
 	}
 }

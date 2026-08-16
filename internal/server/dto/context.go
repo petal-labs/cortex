@@ -84,11 +84,20 @@ type ContextList struct {
 // NewContextList maps an engine list result.
 func NewContextList(r *ctxengine.ListResult) ContextList {
 	if r == nil {
-		return ContextList{Contract: Contract{SchemaVersion}}
+		return ContextList{
+			Contract: Contract{SchemaVersion},
+			Keys:     []string{},
+		}
+	}
+	// Keys is never nil on the wire — clients iterate it directly, so an
+	// empty result emits [] rather than null.
+	keys := r.Keys
+	if keys == nil {
+		keys = []string{}
 	}
 	return ContextList{
 		Contract:   Contract{SchemaVersion},
-		Keys:       r.Keys,
+		Keys:       keys,
 		Count:      r.Count,
 		NextCursor: r.NextCursor,
 	}
@@ -114,7 +123,7 @@ type ContextHistory struct {
 // NewContextHistory maps an engine history result.
 func NewContextHistory(r *ctxengine.HistoryResult) ContextHistory {
 	if r == nil {
-		return ContextHistory{Contract: Contract{SchemaVersion}}
+		return ContextHistory{Contract: Contract{SchemaVersion}, History: []ContextHistoryEntry{}}
 	}
 	out := ContextHistory{
 		Contract:   Contract{SchemaVersion},

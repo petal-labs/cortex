@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "key": "theme",
+  "history": [
+    {
+      "version": 1,
+      "value": "v1",
+      "operation": "set",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "updated_by": "agent"
+    },
+    {
+      "version": 2,
+      "value": {
+        "color": "dark"
+      },
+      "operation": "merge",
+      "updated_at": "2026-06-07T08:09:10Z"
+    }
+  ]
+}

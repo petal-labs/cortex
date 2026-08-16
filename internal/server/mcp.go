@@ -20,6 +20,7 @@ import (
 	"github.com/petal-labs/cortex/internal/entity"
 	"github.com/petal-labs/cortex/internal/knowledge"
 	"github.com/petal-labs/cortex/internal/observability"
+	"github.com/petal-labs/cortex/internal/server/dto"
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
 )
@@ -137,6 +138,7 @@ func (s *Server) registerConversationTools() {
 		mcp.WithNumber("max_content_length",
 			mcp.Description("Truncate content exceeding this character count (optional, useful for large tool outputs)"),
 		),
+		mcp.WithOutputSchema[dto.ConversationAppend](),
 	)
 	s.mcp.AddTool(appendTool, s.handleConversationAppend)
 
@@ -160,6 +162,7 @@ func (s *Server) registerConversationTools() {
 		mcp.WithString("cursor",
 			mcp.Description("Pagination cursor from previous response (optional)"),
 		),
+		mcp.WithOutputSchema[dto.ConversationHistory](),
 	)
 	s.mcp.AddTool(historyTool, s.handleConversationHistory)
 
@@ -187,6 +190,7 @@ func (s *Server) registerConversationTools() {
 		mcp.WithNumber("alpha",
 			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
 		),
+		mcp.WithOutputSchema[dto.ConversationSearch](),
 	)
 	s.mcp.AddTool(searchTool, s.handleConversationSearch)
 
@@ -204,6 +208,7 @@ func (s *Server) registerConversationTools() {
 		mcp.WithNumber("keep_recent",
 			mcp.Description("Number of recent messages to keep unsummarized (default: 10)"),
 		),
+		mcp.WithOutputSchema[dto.ConversationSummarize](),
 	)
 	s.mcp.AddTool(summarizeTool, s.handleConversationSummarize)
 }
@@ -241,6 +246,7 @@ func (s *Server) registerKnowledgeTools() {
 		mcp.WithObject("chunk_config",
 			mcp.Description("Override collection's default chunking (optional)"),
 		),
+		mcp.WithOutputSchema[dto.KnowledgeIngest](),
 	)
 	s.mcp.AddTool(ingestTool, s.handleKnowledgeIngest)
 
@@ -280,6 +286,7 @@ func (s *Server) registerKnowledgeTools() {
 		mcp.WithNumber("alpha",
 			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
 		),
+		mcp.WithOutputSchema[dto.KnowledgeSearch](),
 	)
 	s.mcp.AddTool(searchTool, s.handleKnowledgeSearch)
 
@@ -307,6 +314,7 @@ func (s *Server) registerKnowledgeTools() {
 		mcp.WithObject("chunk_config",
 			mcp.Description("Default chunk config for new documents (for create)"),
 		),
+		mcp.WithOutputSchema[dto.KnowledgeCollectionList](),
 	)
 	s.mcp.AddTool(collectionsTool, s.handleKnowledgeCollections)
 
@@ -334,6 +342,7 @@ func (s *Server) registerKnowledgeTools() {
 		mcp.WithObject("chunk_config",
 			mcp.Description("Override collection's default chunking for all documents (optional)"),
 		),
+		mcp.WithOutputSchema[dto.KnowledgeBulkIngest](),
 	)
 	s.mcp.AddTool(bulkIngestTool, s.handleKnowledgeBulkIngest)
 }
@@ -354,6 +363,7 @@ func (s *Server) registerContextTools() {
 		mcp.WithString("run_id",
 			mcp.Description("Scope to a specific run (omit for persistent context)"),
 		),
+		mcp.WithOutputSchema[dto.ContextGet](),
 	)
 	s.mcp.AddTool(getTool, s.handleContextGet)
 
@@ -381,6 +391,7 @@ func (s *Server) registerContextTools() {
 		mcp.WithNumber("expected_version",
 			mcp.Description("Optimistic concurrency check (optional)"),
 		),
+		mcp.WithOutputSchema[dto.ContextSet](),
 	)
 	s.mcp.AddTool(setTool, s.handleContextSet)
 
@@ -409,6 +420,7 @@ func (s *Server) registerContextTools() {
 		mcp.WithNumber("expected_version",
 			mcp.Description("Optimistic concurrency check (optional)"),
 		),
+		mcp.WithOutputSchema[dto.ContextMerge](),
 	)
 	s.mcp.AddTool(mergeTool, s.handleContextMerge)
 
@@ -431,6 +443,7 @@ func (s *Server) registerContextTools() {
 		mcp.WithNumber("limit",
 			mcp.Description("Max results per page (default: 50)"),
 		),
+		mcp.WithOutputSchema[dto.ContextList](),
 	)
 	s.mcp.AddTool(listTool, s.handleContextList)
 
@@ -454,6 +467,7 @@ func (s *Server) registerContextTools() {
 		mcp.WithNumber("limit",
 			mcp.Description("Max results per page (default: 50)"),
 		),
+		mcp.WithOutputSchema[dto.ContextHistory](),
 	)
 	s.mcp.AddTool(historyTool, s.handleContextHistory)
 }
@@ -477,6 +491,7 @@ func (s *Server) registerEntityTools() {
 		mcp.WithNumber("mention_limit",
 			mcp.Description("Max mentions to return (default: 10)"),
 		),
+		mcp.WithOutputSchema[dto.EntityQuery](),
 	)
 	s.mcp.AddTool(queryTool, s.handleEntityQuery)
 
@@ -505,6 +520,7 @@ func (s *Server) registerEntityTools() {
 		mcp.WithNumber("alpha",
 			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
 		),
+		mcp.WithOutputSchema[dto.EntitySearch](),
 	)
 	s.mcp.AddTool(searchTool, s.handleEntitySearch)
 
@@ -526,6 +542,7 @@ func (s *Server) registerEntityTools() {
 			mcp.Description("Relationship direction (default: both)"),
 			mcp.Enum("outgoing", "incoming", "both"),
 		),
+		mcp.WithOutputSchema[dto.EntityRelationships](),
 	)
 	s.mcp.AddTool(relationshipsTool, s.handleEntityRelationships)
 
@@ -551,6 +568,7 @@ func (s *Server) registerEntityTools() {
 			mcp.Description("Entity type"),
 			mcp.Enum("person", "organization", "product", "location", "concept", "event", "other"),
 		),
+		mcp.WithOutputSchema[dto.EntityUpdate](),
 	)
 	s.mcp.AddTool(updateTool, s.handleEntityUpdate)
 
@@ -569,6 +587,7 @@ func (s *Server) registerEntityTools() {
 			mcp.Required(),
 			mcp.Description("Entity name to merge INTO (will be kept)"),
 		),
+		mcp.WithOutputSchema[dto.EntityMerge](),
 	)
 	s.mcp.AddTool(mergeTool, s.handleEntityMerge)
 
@@ -593,6 +612,7 @@ func (s *Server) registerEntityTools() {
 		mcp.WithString("cursor",
 			mcp.Description("Pagination cursor from previous response (optional)"),
 		),
+		mcp.WithOutputSchema[dto.EntityList](),
 	)
 	s.mcp.AddTool(listTool, s.handleEntityList)
 }
@@ -847,7 +867,7 @@ func (s *Server) handleConversationAppend(ctx context.Context, req mcp.CallToolR
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewConversationAppend(result))
 }
 
 func (s *Server) handleConversationHistory(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -888,7 +908,7 @@ func (s *Server) handleConversationHistory(ctx context.Context, req mcp.CallTool
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewConversationHistory(result))
 }
 
 func (s *Server) handleConversationSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -937,7 +957,7 @@ func (s *Server) handleConversationSearch(ctx context.Context, req mcp.CallToolR
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewConversationSearch(result))
 }
 
 func (s *Server) handleConversationSummarize(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -968,7 +988,7 @@ func (s *Server) handleConversationSummarize(ctx context.Context, req mcp.CallTo
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewConversationSummarize(result))
 }
 
 func (s *Server) handleKnowledgeIngest(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1022,7 +1042,7 @@ func (s *Server) handleKnowledgeIngest(ctx context.Context, req mcp.CallToolRequ
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewKnowledgeIngest(result))
 }
 
 func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1102,7 +1122,7 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewKnowledgeSearch(result))
 }
 
 func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1125,10 +1145,7 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 		if err != nil {
 			return toolError(err)
 		}
-		return jsonResult(map[string]any{
-			"collections": collections,
-			"next_cursor": nextCursor,
-		})
+		return structuredResult(dto.NewKnowledgeCollectionList(collections, nextCursor))
 
 	case "create":
 		name, ok := req.GetArguments()["name"].(string)
@@ -1153,7 +1170,7 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 		if err != nil {
 			return toolError(err)
 		}
-		return jsonResult(result)
+		return structuredResult(dto.NewKnowledgeCollectionCreated(result))
 
 	case "delete":
 		collectionID, ok := req.GetArguments()["collection_id"].(string)
@@ -1165,7 +1182,7 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 		if err != nil {
 			return toolError(err)
 		}
-		return jsonResult(map[string]any{"deleted": true})
+		return structuredResult(dto.NewKnowledgeCollectionDeleted())
 
 	default:
 		return mcp.NewToolResultError(fmt.Sprintf("unknown action: %s", action)), nil
@@ -1252,7 +1269,7 @@ func (s *Server) handleKnowledgeBulkIngest(ctx context.Context, req mcp.CallTool
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewKnowledgeBulkIngest(result))
 }
 
 func (s *Server) handleContextGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1282,7 +1299,7 @@ func (s *Server) handleContextGet(ctx context.Context, req mcp.CallToolRequest) 
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewContextGet(result))
 }
 
 func (s *Server) handleContextSet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1331,7 +1348,7 @@ func (s *Server) handleContextSet(ctx context.Context, req mcp.CallToolRequest) 
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewContextSet(result))
 }
 
 func (s *Server) handleContextMerge(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1379,7 +1396,7 @@ func (s *Server) handleContextMerge(ctx context.Context, req mcp.CallToolRequest
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewContextMerge(result))
 }
 
 func (s *Server) handleContextList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1416,7 +1433,7 @@ func (s *Server) handleContextList(ctx context.Context, req mcp.CallToolRequest)
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewContextList(result))
 }
 
 func (s *Server) handleContextHistory(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1454,7 +1471,7 @@ func (s *Server) handleContextHistory(ctx context.Context, req mcp.CallToolReque
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewContextHistory(result))
 }
 
 func (s *Server) handleEntityQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1492,7 +1509,7 @@ func (s *Server) handleEntityQuery(ctx context.Context, req mcp.CallToolRequest)
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewEntityQuery(result))
 }
 
 func (s *Server) handleEntitySearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1544,7 +1561,7 @@ func (s *Server) handleEntitySearch(ctx context.Context, req mcp.CallToolRequest
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewEntitySearch(result))
 }
 
 func (s *Server) handleEntityRelationships(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1587,7 +1604,7 @@ func (s *Server) handleEntityRelationships(ctx context.Context, req mcp.CallTool
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewEntityRelationships(result))
 }
 
 func (s *Server) handleEntityUpdate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1634,7 +1651,7 @@ func (s *Server) handleEntityUpdate(ctx context.Context, req mcp.CallToolRequest
 		}
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewEntityUpdate(result))
 }
 
 func (s *Server) handleEntityMerge(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1673,7 +1690,7 @@ func (s *Server) handleEntityMerge(ctx context.Context, req mcp.CallToolRequest)
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewEntityMerge(result))
 }
 
 func (s *Server) handleEntityList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1713,17 +1730,22 @@ func (s *Server) handleEntityList(ctx context.Context, req mcp.CallToolRequest) 
 		return toolError(err)
 	}
 
-	return jsonResult(result)
+	return structuredResult(dto.NewEntityList(result))
 }
 
 // Helper functions
 
-func jsonResult(v any) (*mcp.CallToolResult, error) {
-	data, err := json.Marshal(v)
+// structuredResult marshals a response DTO into an MCP tool result with
+// both machine-checkable structured content and a JSON text fallback
+// (shape-identical to the structured payload). The DTO types in
+// internal/server/dto define the frozen wire contract; their json tags are
+// locked by golden-file tests.
+func structuredResult(v any) (*mcp.CallToolResult, error) {
+	result, err := mcp.NewToolResultJSON(v)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return result, nil
 }
 
 func parseChunkConfig(m map[string]any) *types.ChunkConfig {

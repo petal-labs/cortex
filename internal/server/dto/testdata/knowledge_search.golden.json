@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "results": [
+    {
+      "chunk": {
+        "id": "chunk-1",
+        "document_id": "doc-1",
+        "namespace": "ns",
+        "collection_id": "col-1",
+        "content": "chunk content",
+        "index": 0,
+        "token_count": 2
+      },
+      "score": 0.91,
+      "rank": 1,
+      "document_title": "Doc",
+      "source": "test://src"
+    }
+  ],
+  "query": "chunk",
+  "total_found": 1
+}

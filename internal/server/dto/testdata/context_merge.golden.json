@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "key": "theme",
+  "version": 4,
+  "merged_value": {
+    "color": "dark"
+  }
+}

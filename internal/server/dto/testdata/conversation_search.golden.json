@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "results": [
+    {
+      "message": {
+        "id": "msg-1",
+        "namespace": "ns",
+        "thread_id": "thread-1",
+        "role": "user",
+        "content": "hello",
+        "metadata": {
+          "k": "v"
+        },
+        "created_at": "2026-01-02T03:04:05Z"
+      },
+      "score": 0.95,
+      "rank": 1,
+      "thread_id": "thread-1"
+    }
+  ],
+  "query": "hello"
+}

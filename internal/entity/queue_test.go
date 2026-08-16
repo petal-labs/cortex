@@ -259,3 +259,62 @@ func TestQueueProcessorProcessSingle_Integration(t *testing.T) {
 
 	t.Skip("Integration test requires real LLM provider - run manually with API key")
 }
+
+// PanickingExtractor is a mock that panics during Extract, simulating a
+// crash in the extraction path.
+type PanickingExtractor struct{}
+
+func (p *PanickingExtractor) Extract(ctx context.Context, text string) (*ExtractionResult, error) {
+	panic("simulated extraction crash")
+}
+
+func TestQueueProcessorPanicRecovery(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	backend := sqlite.NewWithDB(db)
+	if err := backend.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Entity.ExtractionMode = "full"
+	cfg.Entity.ExtractionInterval = 50 * time.Millisecond
+
+	engine, err := NewEngine(backend, nil, &cfg.Entity)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	resolver := NewResolver(backend, 0.8)
+
+	processor := NewQueueProcessor(backend, &PanickingExtractor{}, resolver, engine, &cfg.Entity)
+
+	// Enqueue an item so processBatch has something to process.
+	if err := backend.EnqueueExtraction(context.Background(), &types.ExtractionQueueItem{
+		Namespace:  "test-ns",
+		SourceType: "conversation",
+		SourceID:   "msg-1",
+		Content:    "Some content that will trigger a panic during extraction",
+	}); err != nil {
+		t.Fatalf("failed to enqueue: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	processor.Start(ctx)
+
+	// Wait long enough for the ticker to fire and processBatch to run.
+	// If panic recovery is not working, the goroutine will crash and
+	// IsRunning will become false (or the process will panic).
+	time.Sleep(200 * time.Millisecond)
+
+	if !processor.IsRunning() {
+		t.Fatal("processor stopped unexpectedly — panic was not recovered")
+	}
+
+	processor.Stop()
+}

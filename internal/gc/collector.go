@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -65,7 +66,16 @@ func (c *Collector) runGCLoop() {
 		case <-c.stopCh:
 			return
 		case <-ticker.C:
-			c.runFullGC()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						observability.Error(context.Background(), "panic recovered in GC loop",
+							zap.Any("panic", r),
+							zap.ByteString("stack", debug.Stack()))
+					}
+				}()
+				c.runFullGC()
+			}()
 		}
 	}
 }
@@ -82,7 +92,16 @@ func (c *Collector) runTTLLoop() {
 		case <-c.stopCh:
 			return
 		case <-ticker.C:
-			c.RunTTLCleanup(context.Background())
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						observability.Error(context.Background(), "panic recovered in TTL cleanup loop",
+							zap.Any("panic", r),
+							zap.ByteString("stack", debug.Stack()))
+					}
+				}()
+				c.RunTTLCleanup(context.Background())
+			}()
 		}
 	}
 }

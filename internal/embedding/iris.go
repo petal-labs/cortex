@@ -18,6 +18,7 @@ type IrisClient struct {
 	dimensions int
 	batchSize  int
 	timeout    time.Duration
+	retry      core.RetryPolicy
 }
 
 // Verify IrisClient implements Provider at compile time.
@@ -40,6 +41,7 @@ func NewIrisClient(cfg *config.Config) (*IrisClient, error) {
 		dimensions: cfg.Embedding.Dimensions,
 		batchSize:  cfg.Embedding.BatchSize,
 		timeout:    cfg.Embedding.Timeout,
+		retry:      core.DefaultRetryPolicy(),
 	}, nil
 }
 
@@ -115,8 +117,33 @@ func (c *IrisClient) EmbedBatch(ctx context.Context, texts []string) ([][]float3
 		}
 	}
 
-	// Call the iris SDK
-	resp, err := c.provider.CreateEmbeddings(ctx, req)
+	// Call the iris SDK with retry on transient failures.
+	// Cortex calls the embedding provider directly rather than through a
+	// core.Client, so iris's own retry logic does not apply here. We replicate
+	// it using the same RetryPolicy the core.Client uses, honoring context
+	// cancellation between attempts.
+	retry := c.retry
+	if retry == nil {
+		retry = core.DefaultRetryPolicy()
+	}
+	var resp *core.EmbeddingResponse
+	var err error
+retryLoop:
+	for attempt := 0; ; attempt++ {
+		resp, err = c.provider.CreateEmbeddings(ctx, req)
+		if err == nil {
+			break
+		}
+		delay, shouldRetry := retry.NextDelay(attempt, err)
+		if !shouldRetry {
+			break
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			break retryLoop
+		}
+	}
 	if err != nil {
 		// Wrap both sentinels so callers can distinguish a timeout
 		// (errors.Is(err, context.DeadlineExceeded)) from other provider

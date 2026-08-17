@@ -89,52 +89,42 @@ func init() {
 
 	// get command
 	contextCmd.AddCommand(contextGetCmd)
-	contextGetCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	contextGetCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	contextGetCmd.Flags().StringP("key", "k", "", "Context key (required)")
 	contextGetCmd.Flags().String("run-id", "", "Run ID for run-scoped context (optional)")
-	contextGetCmd.MarkFlagRequired("namespace")
-	contextGetCmd.MarkFlagRequired("key")
 
 	// set command
 	contextCmd.AddCommand(contextSetCmd)
-	contextSetCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	contextSetCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	contextSetCmd.Flags().StringP("key", "k", "", "Context key (required)")
 	contextSetCmd.Flags().StringP("value", "v", "", "JSON value (required)")
 	contextSetCmd.Flags().String("run-id", "", "Run ID for run-scoped context (optional)")
-	contextSetCmd.Flags().Int("ttl", 0, "Time-to-live in seconds (0 = no expiration)")
+	contextSetCmd.Flags().String("ttl", "", "Time-to-live duration (e.g. 30m, 24h); empty = no expiration")
 	contextSetCmd.Flags().Int64("expected-version", 0, "Expected version for optimistic concurrency")
-	contextSetCmd.MarkFlagRequired("namespace")
-	contextSetCmd.MarkFlagRequired("key")
-	contextSetCmd.MarkFlagRequired("value")
 
 	// delete command
 	contextCmd.AddCommand(contextDeleteCmd)
-	contextDeleteCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	contextDeleteCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	contextDeleteCmd.Flags().StringP("key", "k", "", "Context key (required)")
 	contextDeleteCmd.Flags().String("run-id", "", "Run ID for run-scoped context (optional)")
-	contextDeleteCmd.MarkFlagRequired("namespace")
-	contextDeleteCmd.MarkFlagRequired("key")
 
 	// list command
 	contextCmd.AddCommand(contextListCmd)
-	contextListCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	contextListCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	contextListCmd.Flags().StringP("prefix", "p", "", "Key prefix filter (optional)")
 	contextListCmd.Flags().String("run-id", "", "Run ID filter (optional)")
 	contextListCmd.Flags().Int("limit", 100, "Max results")
-	contextListCmd.MarkFlagRequired("namespace")
 
 	// history command
 	contextCmd.AddCommand(contextHistoryCmd)
-	contextHistoryCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	contextHistoryCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	contextHistoryCmd.Flags().StringP("key", "k", "", "Context key (required)")
 	contextHistoryCmd.Flags().String("run-id", "", "Run ID for run-scoped context (optional)")
 	contextHistoryCmd.Flags().Int("limit", 20, "Max versions to return")
-	contextHistoryCmd.MarkFlagRequired("namespace")
-	contextHistoryCmd.MarkFlagRequired("key")
 
 	// cleanup command
 	contextCmd.AddCommand(contextCleanupCmd)
-	contextCleanupCmd.Flags().StringP("namespace", "n", "", "Namespace (for run cleanup)")
+	contextCleanupCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	contextCleanupCmd.Flags().String("run-id", "", "Run ID to clean up")
 	contextCleanupCmd.Flags().Bool("expired", false, "Clean up all expired entries")
 }
@@ -168,6 +158,12 @@ func runContextGet(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	key, _ := cmd.Flags().GetString("key")
+	if key == "" && len(args) > 0 {
+		key = args[0]
+	}
+	if key == "" {
+		return fmt.Errorf("key is required: pass it as a positional argument or via -k/--key")
+	}
 	runID, _ := cmd.Flags().GetString("run-id")
 
 	opts := &ctxengine.GetOpts{}
@@ -208,9 +204,21 @@ func runContextSet(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	key, _ := cmd.Flags().GetString("key")
+	if key == "" && len(args) > 0 {
+		key = args[0]
+	}
+	if key == "" {
+		return fmt.Errorf("key is required: pass it as a positional argument or via -k/--key")
+	}
 	valueStr, _ := cmd.Flags().GetString("value")
+	if valueStr == "" && len(args) > 1 {
+		valueStr = args[1]
+	}
+	if valueStr == "" {
+		return fmt.Errorf("value is required: pass it as a positional argument or via -v/--value")
+	}
 	runID, _ := cmd.Flags().GetString("run-id")
-	ttlSeconds, _ := cmd.Flags().GetInt("ttl")
+	ttlStr, _ := cmd.Flags().GetString("ttl")
 	expectedVersion, _ := cmd.Flags().GetInt64("expected-version")
 
 	// Parse JSON value
@@ -220,8 +228,12 @@ func runContextSet(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := &ctxengine.SetOpts{}
-	if ttlSeconds > 0 {
-		opts.TTL = time.Duration(ttlSeconds) * time.Second
+	if ttlStr != "" {
+		ttl, err := time.ParseDuration(ttlStr)
+		if err != nil {
+			return fmt.Errorf("invalid --ttl value %q (use a duration like 30m or 24h): %w", ttlStr, err)
+		}
+		opts.TTL = ttl
 	}
 	if runID != "" {
 		opts.RunID = &runID
@@ -253,6 +265,12 @@ func runContextDelete(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	key, _ := cmd.Flags().GetString("key")
+	if key == "" && len(args) > 0 {
+		key = args[0]
+	}
+	if key == "" {
+		return fmt.Errorf("key is required: pass it as a positional argument or via -k/--key")
+	}
 	runID, _ := cmd.Flags().GetString("run-id")
 
 	var runIDPtr *string
@@ -326,6 +344,12 @@ func runContextHistory(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	key, _ := cmd.Flags().GetString("key")
+	if key == "" && len(args) > 0 {
+		key = args[0]
+	}
+	if key == "" {
+		return fmt.Errorf("key is required: pass it as a positional argument or via -k/--key")
+	}
 	runID, _ := cmd.Flags().GetString("run-id")
 	limit, _ := cmd.Flags().GetInt("limit")
 

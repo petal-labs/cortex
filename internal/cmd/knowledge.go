@@ -21,12 +21,14 @@ var knowledgeCmd = &cobra.Command{
 }
 
 var knowledgeIngestCmd = &cobra.Command{
-	Use:   "ingest",
+	Use:   "ingest [file]",
 	Short: "Ingest a document into the knowledge store",
 	Long: `Ingest a document file into a collection. The document is chunked, embedded, and indexed for retrieval.
 
+The file may be passed as a positional argument or via -f/--file.
+
 Examples:
-  cortex knowledge ingest --namespace myapp --collection docs --file README.md
+  cortex knowledge ingest --namespace myapp --collection docs README.md
   cortex knowledge ingest --namespace myapp --collection docs --file manual.txt --title "User Manual"`,
 	RunE: runKnowledgeIngest,
 }
@@ -89,56 +91,52 @@ func init() {
 
 	// ingest command
 	knowledgeCmd.AddCommand(knowledgeIngestCmd)
-	knowledgeIngestCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	knowledgeIngestCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	knowledgeIngestCmd.Flags().StringP("collection", "c", "", "Collection ID (required)")
-	knowledgeIngestCmd.Flags().StringP("file", "f", "", "File to ingest (required)")
+	knowledgeIngestCmd.Flags().StringP("file", "f", "", "File to ingest (or pass the file as a positional argument)")
 	knowledgeIngestCmd.Flags().String("title", "", "Document title (optional, defaults to filename)")
 	knowledgeIngestCmd.Flags().String("content-type", "text", "Content type (text, markdown, html)")
-	knowledgeIngestCmd.MarkFlagRequired("namespace")
+	knowledgeIngestCmd.Flags().String("chunk-strategy", "sentence", "Chunking strategy (fixed, sentence, paragraph, semantic)")
+	knowledgeIngestCmd.Flags().Int("chunk-max-tokens", 512, "Max tokens per chunk")
+	knowledgeIngestCmd.Flags().Int("chunk-overlap", 50, "Token overlap between chunks")
 	knowledgeIngestCmd.MarkFlagRequired("collection")
-	knowledgeIngestCmd.MarkFlagRequired("file")
 
 	// ingest-dir command
 	knowledgeCmd.AddCommand(knowledgeIngestDirCmd)
-	knowledgeIngestDirCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	knowledgeIngestDirCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	knowledgeIngestDirCmd.Flags().StringP("collection", "c", "", "Collection ID (required)")
 	knowledgeIngestDirCmd.Flags().StringP("dir", "d", "", "Directory to scan (required)")
-	knowledgeIngestDirCmd.Flags().StringP("glob", "g", "**/*", "Glob pattern for files")
+	knowledgeIngestDirCmd.Flags().StringP("pattern", "g", "**/*", "Glob pattern for files")
 	knowledgeIngestDirCmd.Flags().String("content-type", "text", "Content type (text, markdown, html)")
-	knowledgeIngestDirCmd.MarkFlagRequired("namespace")
 	knowledgeIngestDirCmd.MarkFlagRequired("collection")
 	knowledgeIngestDirCmd.MarkFlagRequired("dir")
 
 	// search command
 	knowledgeCmd.AddCommand(knowledgeSearchCmd)
-	knowledgeSearchCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	knowledgeSearchCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	knowledgeSearchCmd.Flags().StringP("query", "q", "", "Search query (required)")
 	knowledgeSearchCmd.Flags().StringP("collection", "c", "", "Limit to collection (optional)")
 	knowledgeSearchCmd.Flags().Int("top-k", 10, "Number of results")
 	knowledgeSearchCmd.Flags().Int("context-window", 1, "Chunks before/after to include")
-	knowledgeSearchCmd.MarkFlagRequired("namespace")
-	knowledgeSearchCmd.MarkFlagRequired("query")
+	knowledgeSearchCmd.Flags().String("mode", "vector", "Search mode (vector, hybrid, text)")
 
 	// stats command
 	knowledgeCmd.AddCommand(knowledgeStatsCmd)
-	knowledgeStatsCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	knowledgeStatsCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	knowledgeStatsCmd.Flags().StringP("collection", "c", "", "Collection ID (optional)")
-	knowledgeStatsCmd.MarkFlagRequired("namespace")
 
 	// collections command
 	knowledgeCmd.AddCommand(knowledgeCollectionsCmd)
-	knowledgeCollectionsCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
-	knowledgeCollectionsCmd.MarkFlagRequired("namespace")
+	knowledgeCollectionsCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 
 	// create-collection command
 	knowledgeCmd.AddCommand(knowledgeCreateCollectionCmd)
-	knowledgeCreateCollectionCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	knowledgeCreateCollectionCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	knowledgeCreateCollectionCmd.Flags().String("name", "", "Collection name (required)")
 	knowledgeCreateCollectionCmd.Flags().String("description", "", "Collection description")
 	knowledgeCreateCollectionCmd.Flags().String("chunk-strategy", "sentence", "Chunking strategy (fixed, sentence, paragraph, semantic)")
 	knowledgeCreateCollectionCmd.Flags().Int("chunk-max-tokens", 512, "Max tokens per chunk")
 	knowledgeCreateCollectionCmd.Flags().Int("chunk-overlap", 50, "Token overlap between chunks")
-	knowledgeCreateCollectionCmd.MarkFlagRequired("namespace")
 	knowledgeCreateCollectionCmd.MarkFlagRequired("name")
 }
 
@@ -191,6 +189,16 @@ func runKnowledgeIngest(cmd *cobra.Command, args []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	contentType, _ := cmd.Flags().GetString("content-type")
 
+	// The file may be given positionally (the natural invocation) or via
+	// -f/--file; file is validated manually because MarkFlagRequired
+	// cannot express "flag or positional".
+	if filePath == "" && len(args) > 0 {
+		filePath = args[0]
+	}
+	if filePath == "" {
+		return fmt.Errorf("file is required: pass it as a positional argument or via -f/--file")
+	}
+
 	// Read file content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -202,11 +210,29 @@ func runKnowledgeIngest(cmd *cobra.Command, args []string) error {
 		title = filepath.Base(filePath)
 	}
 
+	var chunkConfig *types.ChunkConfig
+	if cmd.Flags().Changed("chunk-strategy") || cmd.Flags().Changed("chunk-max-tokens") || cmd.Flags().Changed("chunk-overlap") {
+		strategy, _ := cmd.Flags().GetString("chunk-strategy")
+		maxTokens, _ := cmd.Flags().GetInt("chunk-max-tokens")
+		overlap, _ := cmd.Flags().GetInt("chunk-overlap")
+		chunkConfig = &types.ChunkConfig{
+			Strategy:  strategy,
+			MaxTokens: maxTokens,
+			Overlap:   overlap,
+		}
+	}
+
 	ctx := context.Background()
+
+	// Resolve a collection name to its ID, auto-creating on first use so
+	// the documented quick-start (ingest into "docs" directly) works.
+	collectionID = ensureCollectionID(ctx, engine, namespace, collectionID)
+
 	result, err := engine.Ingest(ctx, namespace, collectionID, string(content), &knowledge.IngestOpts{
 		Title:       title,
 		Source:      filePath,
 		ContentType: contentType,
+		ChunkConfig: chunkConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to ingest document: %w", err)
@@ -219,6 +245,43 @@ func runKnowledgeIngest(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolveCollectionID accepts a collection ID or, for convenience, a
+// collection name and returns the ID to use. IDs pass through untouched;
+// unknown values also pass through so callers surface their normal
+// not-found error rather than a resolver one.
+func resolveCollectionID(ctx context.Context, engine *knowledge.Engine, namespace, idOrName string) string {
+	if _, err := engine.GetCollection(ctx, namespace, idOrName); err == nil {
+		return idOrName // already a valid collection ID
+	}
+	collections, _, err := engine.ListCollections(ctx, namespace, "", 100)
+	if err != nil {
+		return idOrName
+	}
+	for _, col := range collections {
+		if col != nil && col.Name == idOrName {
+			return col.ID
+		}
+	}
+	return idOrName
+}
+
+// ensureCollectionID resolves a collection ID or name, and creates the
+// collection on first use: the documented quick-start ingests into "docs"
+// without a prior create-collection step, so the CLI auto-creates with the
+// default chunk config. Errors pass the original name through so callers
+// surface their normal failure.
+func ensureCollectionID(ctx context.Context, engine *knowledge.Engine, namespace, idOrName string) string {
+	if id := resolveCollectionID(ctx, engine, namespace, idOrName); id != idOrName {
+		return id
+	}
+	created, err := engine.CreateCollection(ctx, namespace, knowledge.CreateCollectionOpts{Name: idOrName})
+	if err != nil {
+		return idOrName
+	}
+	fmt.Printf("Created collection: %s\n  Name: %s\n", created.ID, created.Name)
+	return created.ID
+}
+
 func runKnowledgeIngestDir(cmd *cobra.Command, args []string) error {
 	engine, err := initKnowledgeEngine(cmd)
 	if err != nil {
@@ -227,8 +290,9 @@ func runKnowledgeIngestDir(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	collectionID, _ := cmd.Flags().GetString("collection")
+	collectionID = ensureCollectionID(context.Background(), engine, namespace, collectionID)
 	dir, _ := cmd.Flags().GetString("dir")
-	globPattern, _ := cmd.Flags().GetString("glob")
+	globPattern, _ := cmd.Flags().GetString("pattern")
 	contentType, _ := cmd.Flags().GetString("content-type")
 
 	// Find matching files
@@ -296,13 +360,22 @@ func runKnowledgeSearch(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	query, _ := cmd.Flags().GetString("query")
+	if query == "" && len(args) > 0 {
+		query = args[0]
+	}
+	if query == "" {
+		return fmt.Errorf("query is required: pass it as a positional argument or via -q/--query")
+	}
 	collection, _ := cmd.Flags().GetString("collection")
 	topK, _ := cmd.Flags().GetInt("top-k")
 	contextWindow, _ := cmd.Flags().GetInt("context-window")
 
+	mode, _ := cmd.Flags().GetString("mode")
+
 	opts := &knowledge.SearchOpts{
 		TopK:          topK,
 		ContextWindow: contextWindow,
+		SearchMode:    knowledge.SearchMode(mode),
 	}
 	if collection != "" {
 		opts.CollectionID = &collection

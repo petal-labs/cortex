@@ -41,7 +41,7 @@ cortex knowledge search "authentication" --collection docs
 cortex knowledge search "user management" --mode hybrid
 
 # Full-text search only
-cortex knowledge search "error handling" --mode fts
+cortex knowledge search "error handling" --mode text
 ```
 
 ### Manage Collections

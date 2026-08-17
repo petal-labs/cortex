@@ -88,54 +88,47 @@ func init() {
 
 	// history command
 	conversationCmd.AddCommand(conversationHistoryCmd)
-	conversationHistoryCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
-	conversationHistoryCmd.Flags().StringP("thread", "t", "", "Thread ID (required)")
-	conversationHistoryCmd.Flags().Int("last", 0, "Number of recent messages (0 = all)")
+	conversationHistoryCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
+	conversationHistoryCmd.Flags().StringP("thread-id", "t", "", "Thread ID (required)")
+	conversationHistoryCmd.Flags().Int("limit", 0, "Number of recent messages (0 = all)")
 	conversationHistoryCmd.Flags().Bool("include-summary", false, "Include thread summary if available")
 	conversationHistoryCmd.Flags().Bool("json", false, "Output as JSON")
-	conversationHistoryCmd.MarkFlagRequired("namespace")
 	conversationHistoryCmd.MarkFlagRequired("thread")
 
 	// append command
 	conversationCmd.AddCommand(conversationAppendCmd)
-	conversationAppendCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
-	conversationAppendCmd.Flags().StringP("thread", "t", "", "Thread ID (required)")
+	conversationAppendCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
+	conversationAppendCmd.Flags().StringP("thread-id", "t", "", "Thread ID (required)")
 	conversationAppendCmd.Flags().StringP("role", "r", "", "Message role: user, assistant, system, tool (required)")
 	conversationAppendCmd.Flags().StringP("content", "c", "", "Message content (required)")
-	conversationAppendCmd.MarkFlagRequired("namespace")
 	conversationAppendCmd.MarkFlagRequired("thread")
 	conversationAppendCmd.MarkFlagRequired("role")
 	conversationAppendCmd.MarkFlagRequired("content")
 
 	// search command
 	conversationCmd.AddCommand(conversationSearchCmd)
-	conversationSearchCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	conversationSearchCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	conversationSearchCmd.Flags().StringP("query", "q", "", "Search query (required)")
-	conversationSearchCmd.Flags().StringP("thread", "t", "", "Limit to thread (optional)")
+	conversationSearchCmd.Flags().StringP("thread-id", "t", "", "Limit to thread (optional)")
 	conversationSearchCmd.Flags().Int("top-k", 10, "Number of results")
 	conversationSearchCmd.Flags().Float64("min-score", 0.0, "Minimum similarity score (0-1)")
-	conversationSearchCmd.MarkFlagRequired("namespace")
-	conversationSearchCmd.MarkFlagRequired("query")
 
 	// list command
 	conversationCmd.AddCommand(conversationListCmd)
-	conversationListCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	conversationListCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	conversationListCmd.Flags().Int("limit", 50, "Max threads to return")
-	conversationListCmd.MarkFlagRequired("namespace")
 
 	// clear command
 	conversationCmd.AddCommand(conversationClearCmd)
-	conversationClearCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
-	conversationClearCmd.Flags().StringP("thread", "t", "", "Thread ID (required)")
-	conversationClearCmd.MarkFlagRequired("namespace")
+	conversationClearCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
+	conversationClearCmd.Flags().StringP("thread-id", "t", "", "Thread ID (required)")
 	conversationClearCmd.MarkFlagRequired("thread")
 
 	// summarize command
 	conversationCmd.AddCommand(conversationSummarizeCmd)
-	conversationSummarizeCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
-	conversationSummarizeCmd.Flags().StringP("thread", "t", "", "Thread ID (required)")
+	conversationSummarizeCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
+	conversationSummarizeCmd.Flags().StringP("thread-id", "t", "", "Thread ID (required)")
 	conversationSummarizeCmd.Flags().Int("keep-recent", 10, "Number of recent messages to keep unsummarized")
-	conversationSummarizeCmd.MarkFlagRequired("namespace")
 	conversationSummarizeCmd.MarkFlagRequired("thread")
 }
 
@@ -192,8 +185,8 @@ func runConversationHistory(cmd *cobra.Command, args []string) error {
 	}
 
 	namespace, _ := cmd.Flags().GetString("namespace")
-	threadID, _ := cmd.Flags().GetString("thread")
-	lastN, _ := cmd.Flags().GetInt("last")
+	threadID, _ := cmd.Flags().GetString("thread-id")
+	lastN, _ := cmd.Flags().GetInt("limit")
 	includeSummary, _ := cmd.Flags().GetBool("include-summary")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 
@@ -242,7 +235,7 @@ func runConversationAppend(cmd *cobra.Command, args []string) error {
 	}
 
 	namespace, _ := cmd.Flags().GetString("namespace")
-	threadID, _ := cmd.Flags().GetString("thread")
+	threadID, _ := cmd.Flags().GetString("thread-id")
 	role, _ := cmd.Flags().GetString("role")
 	content, _ := cmd.Flags().GetString("content")
 
@@ -274,7 +267,13 @@ func runConversationSearch(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	query, _ := cmd.Flags().GetString("query")
-	threadID, _ := cmd.Flags().GetString("thread")
+	if query == "" && len(args) > 0 {
+		query = args[0]
+	}
+	if query == "" {
+		return fmt.Errorf("query is required: pass it as a positional argument or via -q/--query")
+	}
+	threadID, _ := cmd.Flags().GetString("thread-id")
 	topK, _ := cmd.Flags().GetInt("top-k")
 	minScore, _ := cmd.Flags().GetFloat64("min-score")
 
@@ -360,7 +359,7 @@ func runConversationClear(cmd *cobra.Command, args []string) error {
 	}
 
 	namespace, _ := cmd.Flags().GetString("namespace")
-	threadID, _ := cmd.Flags().GetString("thread")
+	threadID, _ := cmd.Flags().GetString("thread-id")
 
 	ctx := context.Background()
 	if err := engine.Clear(ctx, namespace, threadID); err != nil {
@@ -378,7 +377,7 @@ func runConversationSummarize(cmd *cobra.Command, args []string) error {
 	}
 
 	namespace, _ := cmd.Flags().GetString("namespace")
-	threadID, _ := cmd.Flags().GetString("thread")
+	threadID, _ := cmd.Flags().GetString("thread-id")
 	keepRecent, _ := cmd.Flags().GetInt("keep-recent")
 
 	ctx := context.Background()

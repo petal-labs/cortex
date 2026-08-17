@@ -118,74 +118,60 @@ func init() {
 
 	// create command
 	entityCmd.AddCommand(entityCreateCmd)
-	entityCreateCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityCreateCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityCreateCmd.Flags().String("name", "", "Entity name (required)")
-	entityCreateCmd.Flags().String("type", "", "Entity type: person, organization, location, concept, product (required)")
+	entityCreateCmd.Flags().String("type", "", "Entity type: person, organization, product, location, concept, event, other (required)")
 	entityCreateCmd.Flags().String("summary", "", "Entity summary/description")
 	entityCreateCmd.Flags().StringSlice("aliases", nil, "Additional aliases")
-	entityCreateCmd.MarkFlagRequired("namespace")
 	entityCreateCmd.MarkFlagRequired("name")
 	entityCreateCmd.MarkFlagRequired("type")
 
 	// get command
 	entityCmd.AddCommand(entityGetCmd)
-	entityGetCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityGetCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityGetCmd.Flags().String("id", "", "Entity ID")
 	entityGetCmd.Flags().String("name", "", "Entity name or alias (uses resolve)")
-	entityGetCmd.MarkFlagRequired("namespace")
 
 	// delete command
 	entityCmd.AddCommand(entityDeleteCmd)
-	entityDeleteCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityDeleteCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityDeleteCmd.Flags().String("id", "", "Entity ID (required)")
-	entityDeleteCmd.MarkFlagRequired("namespace")
 	entityDeleteCmd.MarkFlagRequired("id")
 
 	// list command
 	entityCmd.AddCommand(entityListCmd)
-	entityListCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityListCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityListCmd.Flags().String("type", "", "Filter by entity type")
 	entityListCmd.Flags().Int("limit", 50, "Max entities to return")
-	entityListCmd.MarkFlagRequired("namespace")
 
 	// search command
 	entityCmd.AddCommand(entitySearchCmd)
-	entitySearchCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entitySearchCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entitySearchCmd.Flags().StringP("query", "q", "", "Search query (required)")
 	entitySearchCmd.Flags().String("type", "", "Filter by entity type")
 	entitySearchCmd.Flags().Int("top-k", 10, "Number of results")
-	entitySearchCmd.MarkFlagRequired("namespace")
-	entitySearchCmd.MarkFlagRequired("query")
 
 	// add-alias command
 	entityCmd.AddCommand(entityAddAliasCmd)
-	entityAddAliasCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityAddAliasCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityAddAliasCmd.Flags().String("id", "", "Entity ID (required)")
 	entityAddAliasCmd.Flags().String("alias", "", "Alias to add (required)")
-	entityAddAliasCmd.MarkFlagRequired("namespace")
-	entityAddAliasCmd.MarkFlagRequired("id")
 	entityAddAliasCmd.MarkFlagRequired("alias")
 
 	// add-relationship command
 	entityCmd.AddCommand(entityAddRelationshipCmd)
-	entityAddRelationshipCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityAddRelationshipCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityAddRelationshipCmd.Flags().String("source", "", "Source entity ID (required)")
 	entityAddRelationshipCmd.Flags().String("target", "", "Target entity ID (required)")
 	entityAddRelationshipCmd.Flags().String("type", "", "Relationship type (required)")
 	entityAddRelationshipCmd.Flags().String("description", "", "Relationship description")
-	entityAddRelationshipCmd.MarkFlagRequired("namespace")
-	entityAddRelationshipCmd.MarkFlagRequired("source")
-	entityAddRelationshipCmd.MarkFlagRequired("target")
 	entityAddRelationshipCmd.MarkFlagRequired("type")
 
 	// merge command
 	entityCmd.AddCommand(entityMergeCmd)
-	entityMergeCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
+	entityMergeCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 	entityMergeCmd.Flags().String("source", "", "Source entity ID (will be merged into target)")
 	entityMergeCmd.Flags().String("target", "", "Target entity ID (will receive source's data)")
-	entityMergeCmd.MarkFlagRequired("namespace")
-	entityMergeCmd.MarkFlagRequired("source")
-	entityMergeCmd.MarkFlagRequired("target")
 
 	// queue-stats command
 	entityCmd.AddCommand(entityQueueStatsCmd)
@@ -282,6 +268,9 @@ func runEntityGet(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	entityID, _ := cmd.Flags().GetString("id")
+	if entityID == "" && len(args) > 0 {
+		entityID = args[0]
+	}
 	name, _ := cmd.Flags().GetString("name")
 
 	if entityID == "" && name == "" {
@@ -395,6 +384,12 @@ func runEntitySearch(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	query, _ := cmd.Flags().GetString("query")
+	if query == "" && len(args) > 0 {
+		query = args[0]
+	}
+	if query == "" {
+		return fmt.Errorf("query is required: pass it as a positional argument or via -q/--query")
+	}
 	typeFilter, _ := cmd.Flags().GetString("type")
 	topK, _ := cmd.Flags().GetInt("top-k")
 
@@ -436,6 +431,12 @@ func runEntityAddAlias(cmd *cobra.Command, args []string) error {
 
 	namespace, _ := cmd.Flags().GetString("namespace")
 	entityID, _ := cmd.Flags().GetString("id")
+	if entityID == "" && len(args) > 0 {
+		entityID = args[0]
+	}
+	if entityID == "" {
+		return fmt.Errorf("entity ID is required: pass it as a positional argument or via --id")
+	}
 	alias, _ := cmd.Flags().GetString("alias")
 
 	ctx := context.Background()
@@ -456,6 +457,15 @@ func runEntityAddRelationship(cmd *cobra.Command, args []string) error {
 	namespace, _ := cmd.Flags().GetString("namespace")
 	sourceID, _ := cmd.Flags().GetString("source")
 	targetID, _ := cmd.Flags().GetString("target")
+	if sourceID == "" && len(args) > 0 {
+		sourceID = args[0]
+	}
+	if targetID == "" && len(args) > 1 {
+		targetID = args[1]
+	}
+	if sourceID == "" || targetID == "" {
+		return fmt.Errorf("source and target entity IDs are required: pass them as positional arguments or via --source/--target")
+	}
 	relType, _ := cmd.Flags().GetString("type")
 	description, _ := cmd.Flags().GetString("description")
 
@@ -484,6 +494,15 @@ func runEntityMerge(cmd *cobra.Command, args []string) error {
 	namespace, _ := cmd.Flags().GetString("namespace")
 	sourceID, _ := cmd.Flags().GetString("source")
 	targetID, _ := cmd.Flags().GetString("target")
+	if len(args) > 0 {
+		targetID = args[0] // <keep-id>
+	}
+	if len(args) > 1 {
+		sourceID = args[1] // <remove-id>
+	}
+	if sourceID == "" || targetID == "" {
+		return fmt.Errorf("keep and remove entity IDs are required: pass them as positional arguments or via --source/--target")
+	}
 
 	ctx := context.Background()
 	result, err := engine.Merge(ctx, namespace, sourceID, targetID)

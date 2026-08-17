@@ -53,5 +53,10 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringP("config", "c", "", "config file (default is ~/.cortex/config.yaml)")
+	// Shorthand is "C", not "c": persistent flags are merged into every
+	// subcommand's flagset, and several subcommands define their own local
+	// "-c" (knowledge ingest/search/stats use --collection, conversation
+	// append uses --content). pflag panics on the shorthand collision at
+	// parse time, which made those commands crash on any invocation.
+	rootCmd.PersistentFlags().StringP("config", "C", "", "config file (default is ~/.cortex/config.yaml)")
 }

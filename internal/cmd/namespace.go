@@ -40,8 +40,7 @@ func init() {
 
 	// stats command
 	namespaceCmd.AddCommand(namespaceStatsCmd)
-	namespaceStatsCmd.Flags().StringP("namespace", "n", "", "Namespace (required)")
-	namespaceStatsCmd.MarkFlagRequired("namespace")
+	namespaceStatsCmd.Flags().StringP("namespace", "n", "default", "Namespace (defaults to \"default\")")
 
 	// delete command
 	namespaceCmd.AddCommand(namespaceDeleteCmd)

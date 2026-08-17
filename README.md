@@ -109,7 +109,7 @@ cortex serve --namespace my-project
 ### Use the CLI
 
 ```bash
-# Ingest a document
+# Ingest a document (namespace defaults to "default")
 cortex knowledge ingest --collection docs --title "README" --file README.md
 
 # Search knowledge
@@ -432,7 +432,7 @@ cortex context set <key> <value> [--ttl 24h]
 cortex context list [--prefix <prefix>]
 cortex context delete <key>
 cortex context history <key>
-cortex context cleanup [--expired-ttl] [--old-runs]
+cortex context cleanup [--expired] [--run-id <id>]
 ```
 
 ### Entity Memory
@@ -455,7 +455,7 @@ cortex gc [--all] [--dry-run]
 cortex backup --output backup.db
 cortex export --namespace <ns> --output export.json
 cortex namespace stats [--namespace <ns>]
-cortex namespace delete <ns> [--force]
+cortex namespace delete --namespace <ns> --confirm
 ```
 
 ### Terminal UI
@@ -487,7 +487,7 @@ All data is isolated by namespace. Use namespaces to separate:
 - Development vs production data
 
 ```bash
-# All commands accept --namespace
+# All commands accept --namespace (defaults to "default")
 cortex knowledge search "query" --namespace acme/research
 cortex serve --namespace acme/research  # Restricts MCP access
 ```

@@ -29,6 +29,11 @@ var documentedCommands = []struct {
 	{"knowledge search", []string{"how to configure"}},
 	{"knowledge search", []string{"authentication", "--collection", "docs"}},
 	{"knowledge search", []string{"user management", "--mode", "hybrid"}},
+	// Every mode named in README's Search Modes table. The table drifted to
+	// "fts" once while --mode only accepted "text"; locking all three keeps
+	// the table and the flag from separating again.
+	{"knowledge search", []string{"error handling", "--mode", "text"}},
+	{"knowledge search", []string{"machine learning", "--mode", "vector"}},
 	{"knowledge collections", nil},
 	{"knowledge create-collection", []string{"--name", "research", "--description", "Research papers"}},
 	{"knowledge stats", nil},

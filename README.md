@@ -184,7 +184,7 @@ API keys are read from the environment. They are never read from
 | `openai` | `OPENAI_API_KEY` | ✅ | ✅ |
 | `anthropic` | `ANTHROPIC_API_KEY` | ✅ | — |
 | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | ✅ | — |
-| `voyageai` | `VOYAGEAI_API_KEY` | ✅ | ✅ |
+| `voyageai` | `VOYAGEAI_API_KEY` | — | ✅ |
 | `ollama` | *(none — runs locally)* | ✅ | ✅ |
 
 A missing key fails at startup, naming the variable:
@@ -193,11 +193,15 @@ A missing key fails at startup, naming the variable:
 Error: failed to create embedding client: failed to create embedding provider: OPENAI_API_KEY environment variable is required for openai provider
 ```
 
-**Not every provider can embed.** `anthropic` and `gemini` offer no embedding
-API through Iris, so `embedding.provider` must be `openai`, `voyageai`, or
-`ollama`. Choosing another fails at startup with
-`provider gemini does not support embeddings`. Both are fine for
-`summarization.provider`.
+**Not every provider does both.** `anthropic` and `gemini` expose no embedding
+API through Iris; `voyageai` is embeddings-only and cannot summarize. Cortex
+checks this at startup and names the alternatives:
+
+```
+invalid config:
+  - embedding.provider "gemini" does not support embeddings (supported: ollama, openai, voyageai)
+  - summarization.provider "voyageai" does not support summarization (supported: anthropic, gemini, ollama, openai)
+```
 
 A typical setup mixes providers — Anthropic for summarization, OpenAI for
 embeddings:

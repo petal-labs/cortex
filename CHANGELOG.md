@@ -5,6 +5,42 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-08-17
+
+### Added
+
+- **Configuration**
+  - `embedding.provider` and `summarization.provider` are validated at
+    startup, against both the set of known providers and what each one can
+    actually do. An unusable pairing previously passed validation and failed
+    later at client construction, so `provider gemini does not support
+    embeddings` arrived on the first search rather than alongside the other
+    config errors:
+
+    ```
+    invalid config:
+      - embedding.provider "gemini" does not support embeddings (supported: ollama, openai, voyageai)
+      - summarization.provider "voyageai" does not support summarization (supported: anthropic, gemini, ollama, openai)
+    ```
+
+    Because entity extraction reuses `summarization.provider`, this also
+    catches an extraction setup that could never have run.
+
+### Documentation
+
+- Documented provider setup, which was previously absent: the environment
+  variable each provider reads, which providers can embed versus summarize,
+  how entity extraction inherits `summarization.provider`, and a full Ollama
+  walkthrough including matching `embedding.dimensions` to the model.
+- Corrected the provider capability table: `voyageai` is embeddings-only. Its
+  `Chat` returns `ErrNotSupported`, so it cannot serve `summarization.provider`.
+- Removed settings that did nothing. `CORTEX_DATA_DIR` never had an effect —
+  Viper's `AutomaticEnv` maps `storage.data_dir` to `CORTEX_STORAGE.DATA_DIR`,
+  not a valid variable name, so no `CORTEX_*` override resolves; use a config
+  file via `-C`. `IRIS_ENDPOINT` predates the SDK migration and is read
+  nowhere. `cortex --log-level` is not a flag; log level is the
+  `server.log_level` config key.
+
 ## [1.1.0] - 2026-08-17
 
 Reconciles the CLI with the interface README and `examples/cli-basics` have
@@ -364,6 +400,7 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
+[1.1.1]: https://github.com/petal-labs/cortex/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/petal-labs/cortex/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/petal-labs/cortex/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/petal-labs/cortex/compare/v0.3.0...v1.0.0

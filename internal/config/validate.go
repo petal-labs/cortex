@@ -4,7 +4,38 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/petal-labs/cortex/internal/llm"
 )
+
+// validateProvider checks one provider setting: that it is set, that it
+// names a known provider, and that the provider supports the feature the
+// setting is used for. Returns the problems found, so callers append to the
+// aggregated report rather than returning early.
+//
+// Without this, an unusable pairing passed Validate and failed later at
+// client construction — "provider gemini does not support embeddings"
+// surfaced on the first search instead of at startup with the other config
+// errors.
+func validateProvider(key, value string, supports func(llm.Capabilities) bool, feature string, alternatives []string) []string {
+	if strings.TrimSpace(value) == "" {
+		return []string{fmt.Sprintf("%s is required (supported: %s)",
+			key, strings.Join(alternatives, ", "))}
+	}
+
+	caps, known := llm.ProviderCapabilities(value)
+	if !known {
+		return []string{fmt.Sprintf("%s %q is not supported (supported: %s)",
+			key, value, strings.Join(llm.SupportedProviders(), ", "))}
+	}
+
+	if !supports(caps) {
+		return []string{fmt.Sprintf("%s %q does not support %s (supported: %s)",
+			key, value, feature, strings.Join(alternatives, ", "))}
+	}
+
+	return nil
+}
 
 // Validate checks required fields and value ranges, returning an error that
 // lists every violation with its config key and an actionable message. It
@@ -46,6 +77,11 @@ func (c *Config) Validate() error {
 	}
 
 	// Embedding
+	problems = append(problems, validateProvider(
+		"embedding.provider", c.Embedding.Provider,
+		func(caps llm.Capabilities) bool { return caps.Embeddings },
+		"embeddings", llm.EmbeddingProviders())...)
+
 	if c.Embedding.Dimensions <= 0 {
 		problems = append(problems, fmt.Sprintf(
 			"embedding.dimensions must be > 0 (got %d)", c.Embedding.Dimensions))
@@ -63,7 +99,13 @@ func (c *Config) Validate() error {
 			"embedding.timeout must be >= 0, 0 disables the timeout (got %s)", c.Embedding.Timeout))
 	}
 
-	// Summarization
+	// Summarization. Entity extraction reuses this provider with
+	// entity.extraction_model, so a provider without chat breaks both.
+	problems = append(problems, validateProvider(
+		"summarization.provider", c.Summarization.Provider,
+		func(caps llm.Capabilities) bool { return caps.Chat },
+		"summarization", llm.ChatProviders())...)
+
 	if c.Summarization.MaxTokens < 0 {
 		problems = append(problems, fmt.Sprintf(
 			"summarization.max_tokens must be >= 0 (got %d)", c.Summarization.MaxTokens))

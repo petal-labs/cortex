@@ -250,8 +250,12 @@ cortex completion fish > ~/.config/fish/completions/cortex.fish
 ### Debug Mode
 
 ```bash
-# Enable verbose logging
-cortex --log-level debug serve
+# Enable verbose logging (a config key, not a flag)
+cat >> ~/.cortex/config.yaml <<'YAML'
+server:
+  log_level: debug  # debug, info, warn, error
+YAML
+cortex serve
 ```
 
 ### Configuration File
@@ -264,6 +268,8 @@ storage:
   data_dir: ~/.cortex/data
 
 embedding:
+  provider: openai  # openai, voyageai, or ollama
+  model: text-embedding-3-small
   dimensions: 1536
   timeout: 120s
 
@@ -271,6 +277,21 @@ knowledge:
   default_chunk_strategy: sentence
   default_chunk_max_tokens: 512
 ```
+
+Use a config file elsewhere with `-C`:
+
+```bash
+cortex -C /path/to/config.yaml knowledge search "query"
+```
+
+API keys are not read from this file — export them instead:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+See [Provider API Keys](../../README.md#provider-api-keys) for the variable
+each provider expects. Ollama needs none.
 
 The config is validated at startup. Bad values abort the command and are
 reported together, each with its config key:

@@ -68,39 +68,88 @@ Quit and reopen Claude Desktop. You should see Cortex tools available in the too
 }
 ```
 
+### With Provider API Keys
+
+Claude Desktop launches Cortex directly, so it does not inherit the API keys
+from your shell profile. Pass them in the `env` block:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "cortex",
+      "args": ["serve", "--namespace", "claude"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-...",
+        "OPENAI_API_KEY": "sk-..."
+      }
+    }
+  }
+}
+```
+
+Which keys you need depends on the providers in your config — see
+[Provider API Keys](../../README.md#provider-api-keys). Without them, Cortex
+exits at startup and Claude Desktop reports the server as failed to connect.
+
 ### With Custom Data Directory
 
-```json
-{
-  "mcpServers": {
-    "cortex": {
-      "command": "cortex",
-      "args": ["serve", "--namespace", "claude"],
-      "env": {
-        "CORTEX_DATA_DIR": "/path/to/your/cortex/data"
-      }
-    }
-  }
-}
+The data directory comes from `config.yaml`, not the environment. Write one
+and point Cortex at it with `-C`:
+
+```yaml
+# /path/to/cortex-config.yaml
+storage:
+  backend: sqlite
+  data_dir: /path/to/your/cortex/data
 ```
-
-### With Iris Embedding Service
-
-If you're running an [Iris](https://github.com/petal-labs/iris) embedding service:
 
 ```json
 {
   "mcpServers": {
     "cortex": {
       "command": "cortex",
-      "args": ["serve", "--namespace", "claude"],
-      "env": {
-        "IRIS_ENDPOINT": "http://localhost:8000"
-      }
+      "args": ["-C", "/path/to/cortex-config.yaml", "serve", "--namespace", "claude"]
     }
   }
 }
 ```
+
+The shorthand is `-C`, not `-c` — `-c` is `--collection` on several
+subcommands.
+
+### With Ollama (no API key)
+
+To run entirely locally, configure Ollama in `config.yaml` and pass no keys at
+all:
+
+```yaml
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  dimensions: 768
+
+summarization:
+  provider: ollama
+  model: llama3.1
+
+entity:
+  extraction_model: llama3.1
+```
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "cortex",
+      "args": ["-C", "/path/to/cortex-config.yaml", "serve", "--namespace", "claude"]
+    }
+  }
+}
+```
+
+If Ollama is not on `http://localhost:11434`, add
+`"env": {"OLLAMA_BASE_URL": "http://your-host:11434"}`.
 
 ## Available Tools
 
@@ -179,6 +228,17 @@ cortex knowledge ingest \
 2. Verify the config file syntax is valid JSON
 3. Check Claude Desktop logs for errors
 4. Restart Claude Desktop completely
+
+### Server exits immediately with a missing API key
+
+Claude Desktop does not inherit your shell environment, so a key exported in
+`.zshrc` is not visible to the server it spawns. The failure looks like:
+
+```
+Error: failed to create embedding client: failed to create embedding provider: OPENAI_API_KEY environment variable is required for openai provider
+```
+
+Add the key to the `env` block above, or switch to Ollama, which needs none.
 
 ### Server exits immediately with "invalid config"
 

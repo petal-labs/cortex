@@ -81,7 +81,11 @@ existing database is a startup error rather than a silent bad write.
 ### Embedding Provider
 
 For semantic search, you need an embedding provider. The Iris client reads its
-provider, model, dimensions, and timeout from the config:
+provider, model, dimensions, and timeout from the config — but the API key
+comes from the environment (`OPENAI_API_KEY` here; see
+[Provider API Keys](../../README.md#provider-api-keys)). `NewIrisClient`
+returns an error naming the missing variable, so this fails loudly rather than
+at first search. Only `openai`, `voyageai`, and `ollama` can embed:
 
 ```go
 import "github.com/petal-labs/cortex/internal/embedding"

@@ -200,20 +200,21 @@ Query: How do I configure the embedding service?
 ============================================================
 RESPONSE
 ============================================================
-To configure the embedding service in Cortex, you have several options:
+To configure the embedding service in Cortex, you have two steps:
 
-1. **Using Iris (Recommended)**
-   Set the IRIS_ENDPOINT environment variable:
-   ```bash
-   export IRIS_ENDPOINT=http://localhost:8000
-   ```
-
-2. **In config.yaml**
+1. **Choose a provider in config.yaml**
    ```yaml
    embedding:
-     endpoint: http://localhost:8000
+     provider: openai        # openai, voyageai, or ollama
+     model: text-embedding-3-small
      dimensions: 1536
    ```
+
+2. **Export the provider's API key**
+   ```bash
+   export OPENAI_API_KEY=sk-...
+   ```
+   Ollama needs no key and runs locally.
 ...
 
 ------------------------------------------------------------

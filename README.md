@@ -140,7 +140,7 @@ storage:
   data_dir: ~/.cortex/data
 
 embedding:
-  provider: openai  # openai, voyageai, gemini, ollama
+  provider: openai  # openai, voyageai, ollama
   model: text-embedding-3-small
   dimensions: 1536
   cache_size: 10000
@@ -172,6 +172,106 @@ server:
   metrics_port: 9811
   structured_logging: true
   shutdown_timeout: 30s
+```
+
+### Provider API Keys
+
+API keys are read from the environment. They are never read from
+`config.yaml`, so the config file stays safe to commit.
+
+| Provider | Environment variable | Summarization / extraction | Embeddings |
+|----------|---------------------|:--------------------------:|:----------:|
+| `openai` | `OPENAI_API_KEY` | ✅ | ✅ |
+| `anthropic` | `ANTHROPIC_API_KEY` | ✅ | — |
+| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | ✅ | — |
+| `voyageai` | `VOYAGEAI_API_KEY` | ✅ | ✅ |
+| `ollama` | *(none — runs locally)* | ✅ | ✅ |
+
+A missing key fails at startup, naming the variable:
+
+```
+Error: failed to create embedding client: failed to create embedding provider: OPENAI_API_KEY environment variable is required for openai provider
+```
+
+**Not every provider can embed.** `anthropic` and `gemini` offer no embedding
+API through Iris, so `embedding.provider` must be `openai`, `voyageai`, or
+`ollama`. Choosing another fails at startup with
+`provider gemini does not support embeddings`. Both are fine for
+`summarization.provider`.
+
+A typical setup mixes providers — Anthropic for summarization, OpenAI for
+embeddings:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+```
+
+```yaml
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+  dimensions: 1536
+
+summarization:
+  provider: anthropic
+  model: claude-sonnet-4-6
+```
+
+**Entity extraction has no provider setting of its own.** It reuses
+`summarization.provider` with `entity.extraction_model`, so that model must be
+one the summarization provider serves. If you switch `summarization.provider`,
+change `entity.extraction_model` to match — the default,
+`claude-haiku-4-5`, is an Anthropic model.
+
+```yaml
+summarization:
+  provider: openai
+  model: gpt-4o
+entity:
+  extraction_model: gpt-4o-mini  # must be an OpenAI model too
+```
+
+### Using Ollama
+
+Ollama needs no API key. Pull the models you intend to use, then point both
+settings at them:
+
+```bash
+ollama pull nomic-embed-text
+ollama pull llama3.1
+```
+
+```yaml
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  dimensions: 768        # must match the model — nomic-embed-text is 768
+
+summarization:
+  provider: ollama
+  model: llama3.1
+
+entity:
+  extraction_model: llama3.1  # reuses summarization.provider
+```
+
+Set `dimensions` to whatever your embedding model actually returns. A mismatch
+is caught on the first call rather than silently corrupting the index:
+
+```
+embedding 0 has 768 dimensions, expected 1536 (check embedding model and dimensions config)
+```
+
+On pgvector the dimension is baked into the schema at creation, so decide
+before first run — see [PostgreSQL Setup](#postgresql-setup).
+
+Cortex talks to `http://localhost:11434` by default. To reach Ollama
+elsewhere, set `OLLAMA_BASE_URL` (Cortex reads this first) or `OLLAMA_HOST`
+(Iris's fallback):
+
+```bash
+export OLLAMA_BASE_URL=http://gpu-box:11434
 ```
 
 ### Config Validation

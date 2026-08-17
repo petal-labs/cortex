@@ -470,9 +470,9 @@ Cortex supports three search modes:
 
 | Mode | Description |
 |------|-------------|
-| `vector` | Semantic similarity using embeddings |
-| `fts` | Full-text search using BM25 (SQLite) or ts_rank (PostgreSQL) |
-| `hybrid` | Combines vector and FTS using Reciprocal Rank Fusion |
+| `vector` | Semantic similarity using embeddings (default) |
+| `text` | Full-text search using BM25 (SQLite) or ts_rank (PostgreSQL) |
+| `hybrid` | Combines vector and full-text using Reciprocal Rank Fusion |
 
 ```bash
 cortex knowledge search "machine learning" --mode hybrid
@@ -585,12 +585,13 @@ go build -o cortex ./cmd/cortex
 
 ## Versioning
 
-Cortex follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). As
-of 1.0.0, three surfaces are covered by that guarantee:
+Cortex follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Four surfaces are covered by that guarantee:
 
 | Surface | Contract |
 |---------|----------|
 | MCP tool arguments and responses | `schema_version` identifies the response contract; a breaking shape change bumps it and the major version |
+| CLI commands and flags | Flag names and argument forms are stable within a major version; renaming or removing one requires a major bump |
 | `pkg/types` | Exported types are stable within a major version |
 | Storage schema | Versioned migrations apply forward automatically; no manual DDL |
 
@@ -598,7 +599,14 @@ The `internal/` packages are explicitly not covered — they may change in any
 release. Use the MCP interface or `pkg/types` for anything you need to hold
 stable.
 
-See [CHANGELOG.md](./CHANGELOG.md) for the upgrade notes from 0.3.x.
+The CLI guarantee takes effect from 1.1.0. Coverage of the other three began
+at 1.0.0, and 1.1.0 itself renamed several flags to match what the docs had
+always specified — see the [CHANGELOG](./CHANGELOG.md) if you are upgrading
+from 1.0.x. Every command invocation shown in this README and in
+[examples/cli-basics](./examples/cli-basics/) is exercised by a test, so a
+flag that drifts from its documentation fails CI.
+
+See [CHANGELOG.md](./CHANGELOG.md) for upgrade notes.
 
 ## License
 

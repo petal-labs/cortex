@@ -5,6 +5,74 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-08-17
+
+Reconciles the CLI with the interface README and `examples/cli-basics` have
+always documented. Several commands were unusable before this release; the
+flags that changed are listed below because scripts written against 1.0.x
+`--help` output will need updating.
+
+As of this release the CLI is a versioned surface — see
+[Versioning](README.md#versioning). Flag removals now require a major bump.
+
+### Changed
+
+- **CLI — breaking.** No aliases are retained for the old spellings.
+
+  | Was | Now | Notes |
+  |-----|-----|-------|
+  | `--thread` | `--thread-id` | all `conversation` subcommands |
+  | `--last` | `--limit` | `conversation history` |
+  | `--glob` | `--pattern` | `knowledge ingest-dir` |
+  | `-c` (for `--config`) | `-C` | see below |
+  | `--ttl 3600` | `--ttl 1h` | now a duration, not integer seconds |
+
+  **`-c` needs care.** It no longer means `--config`, and the two failure
+  modes differ. `cortex -c cfg.yaml serve` now errors with
+  `unknown shorthand flag: 'c'`. But on commands that define their own `-c`,
+  such as `knowledge ingest`, it is *silently* reinterpreted — there
+  `-c cfg.yaml` now binds to `--collection`. Audit scripts for `-c` rather
+  than relying on a failure to surface it.
+
+- `--namespace` now defaults to `"default"` on data-plane commands instead of
+  being required. It stays required on `export` and `namespace delete`, where
+  operating on the wrong namespace is destructive.
+
+- Search commands take their query positionally
+  (`cortex knowledge search "query"`), as documented. The same applies to
+  `context` keys and `entity` IDs.
+
+### Added
+
+- `knowledge ingest` accepts the documented `--chunk-strategy`,
+  `--chunk-max-tokens`, and `--chunk-overlap` flags.
+- `knowledge ingest` and `ingest-dir` create the target collection on first
+  use, so the documented examples work without a separate create step.
+- `knowledge ingest` accepts the file as a positional argument, and
+  `create-collection` accepts the name positionally.
+- A test that locks every command invocation appearing in README and
+  `examples/cli-basics` (`internal/cmd/documented_commands_test.go`), so a
+  renamed flag or newly required argument fails CI rather than shipping.
+
+### Fixed
+
+- **SQLite** — `New` now runs migrations, mirroring the pgvector backend.
+  Every caller that did not explicitly call `Migrate` — `serve`, all the
+  data-plane CLI commands, the examples — failed on a fresh database with
+  `no such table`. The runner is versioned and idempotent.
+- **CLI** — `--config`'s `-c` shorthand collided with local `-c` flags on
+  several subcommands (`knowledge ingest`/`search`/`stats` use
+  `--collection`, `conversation append` uses `--content`). pflag panics on a
+  shorthand collision at parse time, so those commands crashed on any
+  invocation. Resolved by moving `--config` to `-C`.
+
+### Documentation
+
+- Corrected remaining divergences between the docs and the CLI: search mode
+  is `--mode text` (not `fts`), `namespace delete` takes
+  `--namespace <ns> --confirm`, and `context cleanup` takes
+  `--expired`/`--run-id`.
+
 ## [1.0.1] - 2026-08-16
 
 ### Fixed
@@ -296,6 +364,7 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
+[1.1.0]: https://github.com/petal-labs/cortex/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/petal-labs/cortex/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/petal-labs/cortex/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/petal-labs/cortex/compare/v0.2.1...v0.3.0

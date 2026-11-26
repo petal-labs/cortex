@@ -52,28 +52,53 @@ func testGarbageCollection(ctx context.Context, t *testing.T, b storage.Backend,
 	})
 
 	t.Run("PruneStaleEntities", func(t *testing.T) {
+		now := time.Now().UTC()
 		if err := b.UpsertEntity(ctx, &types.Entity{
-			ID:        "gc-entity",
-			Namespace: ns,
-			Name:      "Stale Entity",
-			Type:      types.EntityTypePerson,
+			ID:           "gc-entity-fresh",
+			Namespace:    ns,
+			Name:         "Fresh Entity",
+			Type:         types.EntityTypePerson,
+			MentionCount: 0,
+			LastSeenAt:   now,
 		}); err != nil {
-			t.Fatalf("UpsertEntity: %v", err)
+			t.Fatalf("UpsertEntity fresh: %v", err)
+		}
+		if err := b.UpsertEntity(ctx, &types.Entity{
+			ID:           "gc-entity-stale",
+			Namespace:    ns,
+			Name:         "Stale Entity",
+			Type:         types.EntityTypePerson,
+			MentionCount: 0,
+			LastSeenAt:   now.Add(-48 * time.Hour),
+		}); err != nil {
+			t.Fatalf("UpsertEntity stale: %v", err)
+		}
+		if err := b.UpsertEntity(ctx, &types.Entity{
+			ID:           "gc-entity-active",
+			Namespace:    ns,
+			Name:         "Active Entity",
+			Type:         types.EntityTypePerson,
+			MentionCount: 10,
+			LastSeenAt:   now.Add(-48 * time.Hour),
+		}); err != nil {
+			t.Fatalf("UpsertEntity active: %v", err)
 		}
 
-		// Entity has 0 mentions. With minMentions=1 and a small staleDuration,
-		// it should be pruned after a brief wait.
-		time.Sleep(50 * time.Millisecond)
-		deleted, err := b.PruneStaleEntities(ctx, 25*time.Millisecond, 1)
+		deleted, err := b.PruneStaleEntities(ctx, 24*time.Hour, 5)
 		if err != nil {
 			t.Fatalf("PruneStaleEntities: %v", err)
 		}
-		if deleted < 1 {
-			t.Errorf("expected at least 1 entity pruned, got %d", deleted)
+		if deleted != 1 {
+			t.Errorf("expected 1 stale low-mention entity pruned, got %d", deleted)
 		}
-		_, err = b.GetEntityByID(ctx, ns, "gc-entity")
-		if err != storage.ErrNotFound {
-			t.Errorf("expected ErrNotFound after prune, got %v", err)
+		if _, err := b.GetEntityByID(ctx, ns, "gc-entity-fresh"); err != nil {
+			t.Errorf("fresh entity should still exist: %v", err)
+		}
+		if _, err := b.GetEntityByID(ctx, ns, "gc-entity-stale"); err != storage.ErrNotFound {
+			t.Errorf("expected ErrNotFound for stale entity, got %v", err)
+		}
+		if _, err := b.GetEntityByID(ctx, ns, "gc-entity-active"); err != nil {
+			t.Errorf("high-mention entity should still exist: %v", err)
 		}
 	})
 

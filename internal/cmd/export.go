@@ -128,8 +128,8 @@ func runSQLiteExport(cfg *config.Config, namespace, output string, opts storage.
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(output, jsonData, 0644); err != nil {
+	// Write to file with owner-only permissions since exports may contain sensitive data
+	if err := os.WriteFile(output, jsonData, 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

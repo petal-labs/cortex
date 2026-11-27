@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -99,7 +100,7 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 		args = append(args, cursor)
 	}
 
-	query += " ORDER BY created_at DESC LIMIT ?"
+	query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
 	args = append(args, limit+1) // Fetch one extra to determine if there are more
 
 	rows, err := b.db.QueryContext(ctx, query, args...)
@@ -146,6 +147,78 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 	// Reverse to get chronological order (oldest first)
 	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
 		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nextCursor, nil
+}
+
+// GetUnsummarizedMessages retrieves unsummarized messages from a thread in chronological order.
+// If limit > 0, returns up to the most recent limit unsummarized messages with cursor pagination.
+// If limit <= 0, returns all unsummarized messages.
+func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error) {
+	var args []any
+	query := `
+		SELECT id, namespace, thread_id, role, content, metadata, summarized, created_at
+		FROM messages
+		WHERE namespace = ? AND thread_id = ? AND summarized = 0
+	`
+	args = append(args, namespace, threadID)
+
+	if cursor != "" {
+		query += " AND created_at < ?"
+		args = append(args, cursor)
+	}
+
+	if limit > 0 {
+		query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+		args = append(args, limit+1)
+	} else {
+		query += " ORDER BY created_at ASC, rowid ASC"
+	}
+
+	rows, err := b.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to query unsummarized messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []*types.Message
+	for rows.Next() {
+		msg := &types.Message{}
+		var metadataJSON sql.NullString
+		var createdAtUnix int64
+
+		if err := rows.Scan(&msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content, &metadataJSON, &msg.Summarized, &createdAtUnix); err != nil {
+			return nil, "", fmt.Errorf("failed to scan message: %w", err)
+		}
+
+		msg.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
+
+		if metadataJSON.Valid && metadataJSON.String != "" {
+			if err := json.Unmarshal([]byte(metadataJSON.String), &msg.Metadata); err != nil {
+				return nil, "", fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("failed to iterate unsummarized messages: %w", err)
+	}
+
+	var nextCursor string
+	if limit > 0 {
+		if len(messages) > limit {
+			messages = messages[:limit]
+			if len(messages) > 0 {
+				nextCursor = fmt.Sprintf("%d", messages[len(messages)-1].CreatedAt.Unix())
+			}
+		}
+		// Reverse to get chronological order (oldest first)
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
 	}
 
 	return messages, nextCursor, nil
@@ -335,6 +408,43 @@ func (b *Backend) MarkMessagesSummarized(ctx context.Context, namespace, threadI
 	}
 
 	return nil
+}
+
+// MarkMessagesSummarizedByIDs marks the specified message IDs as having been included in a summary.
+func (b *Backend) MarkMessagesSummarizedByIDs(ctx context.Context, namespace, threadID string, messageIDs []string) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+
+	const batchSize = 500
+	return b.withTx(ctx, func(tx *sql.Tx) error {
+		for start := 0; start < len(messageIDs); start += batchSize {
+			end := start + batchSize
+			if end > len(messageIDs) {
+				end = len(messageIDs)
+			}
+			batch := messageIDs[start:end]
+
+			placeholders := strings.Repeat("?,", len(batch))
+			placeholders = placeholders[:len(placeholders)-1]
+
+			args := make([]any, 0, 2+len(batch))
+			args = append(args, namespace, threadID)
+			for _, id := range batch {
+				args = append(args, id)
+			}
+
+			query := fmt.Sprintf(`
+				UPDATE messages
+				SET summarized = 1
+				WHERE namespace = ? AND thread_id = ? AND id IN (%s)
+			`, placeholders)
+			if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+				return fmt.Errorf("failed to mark messages summarized by IDs: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // SearchMessages performs semantic search across messages in a namespace.

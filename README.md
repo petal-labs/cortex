@@ -35,7 +35,6 @@ Cortex is a memory and knowledge service for AI agents. It provides persistent c
 **Developer Experience:**
 
 - MCP-native — works with any MCP-compatible client
-- Web dashboard for browsing data
 - Terminal UI for quick inspection
 - Comprehensive CLI for all operations
 

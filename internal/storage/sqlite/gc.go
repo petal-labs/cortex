@@ -65,7 +65,10 @@ func (b *Backend) DeleteOldConversations(ctx context.Context, olderThan time.Dur
 // and have fewer mentions than the threshold.
 // Returns the number of entities deleted.
 func (b *Backend) PruneStaleEntities(ctx context.Context, staleDuration time.Duration, minMentions int) (int64, error) {
-	cutoff := time.Now().Add(-staleDuration)
+	// last_seen_at is stored as INTEGER Unix seconds, like the other
+	// SQLite timestamp columns. Binding time.Time makes go-sqlite3 send
+	// a TEXT value, and INTEGER < TEXT then deletes fresh entities.
+	cutoff := time.Now().Add(-staleDuration).Unix()
 
 	// First, get the count of entities to be deleted
 	var count int64

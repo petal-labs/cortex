@@ -713,28 +713,58 @@ Docker provider is available.
 go build -tags sqlite_fts5 -o cortex ./cmd/cortex
 ```
 
+## Go SDK (`pkg/cortex`)
+
+External Go applications and PetalFlow agents can embed Cortex directly without importing `internal/` packages using [`github.com/petal-labs/cortex/pkg/cortex`](./pkg/cortex/) and [`pkg/types`](./pkg/types/):
+
+```go
+client, err := cortex.Open(ctx,
+    cortex.WithSQLite("./data"),
+    // Optional: configure embeddings, summarization, or entity extraction:
+    // cortex.WithIrisEmbedding("openai", "text-embedding-3-small", 1536),
+)
+if err != nil {
+    return err
+}
+defer client.Close()
+
+col, err := client.Knowledge().CreateCollection(ctx, "my-app", cortex.CreateCollectionOpts{
+    Name:        "docs",
+    Description: "Application documentation",
+})
+_, err = client.Knowledge().Ingest(ctx, "my-app", col.ID, "Cortex Go SDK overview", &cortex.IngestOpts{
+    Title: "Overview",
+})
+_, err = client.Context().Set(ctx, "my-app", "workflow.step", "ready", nil)
+_, err = client.Conversation().Append(ctx, "my-app", "thread-1", "user", "Hello!", nil)
+_, err = client.Entity().Create(ctx, "my-app", "Cortex", types.EntityTypeProduct, nil)
+```
+
+See [examples/go-client/main.go](./examples/go-client/main.go) for a complete runnable example (`go run -tags sqlite_fts5 ./examples/go-client`).
+
 ## Versioning
 
 Cortex follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Four surfaces are covered by that guarantee:
+Five surfaces are covered by that guarantee:
 
 | Surface | Contract |
 |---------|----------|
 | MCP tool arguments and responses | `schema_version` identifies the response contract; a breaking shape change bumps it and the major version |
 | CLI commands and flags | Flag names and argument forms are stable within a major version; renaming or removing one requires a major bump |
+| `pkg/cortex` | Exported Go SDK client, options, and sub-client APIs are stable within a major version |
 | `pkg/types` | Exported types are stable within a major version |
 | Storage schema | Versioned migrations apply forward automatically; no manual DDL |
 
 The `internal/` packages are explicitly not covered — they may change in any
-release. Use the MCP interface or `pkg/types` for anything you need to hold
-stable.
+release. Use the MCP interface, `pkg/cortex`, or `pkg/types` for anything you
+need to hold stable.
 
-The CLI guarantee takes effect from 1.1.0. Coverage of the other three began
-at 1.0.0, and 1.1.0 itself renamed several flags to match what the docs had
-always specified — see the [CHANGELOG](./CHANGELOG.md) if you are upgrading
-from 1.0.x. Every command invocation shown in this README and in
-[examples/cli-basics](./examples/cli-basics/) is exercised by a test, so a
-flag that drifts from its documentation fails CI.
+The CLI guarantee takes effect from 1.1.0. Coverage of the other surfaces began
+at 1.0.0 (and `pkg/cortex` upon its introduction), and 1.1.0 itself renamed
+several flags to match what the docs had always specified — see the
+[CHANGELOG](./CHANGELOG.md) if you are upgrading from 1.0.x. Every command
+invocation shown in this README and in [examples/cli-basics](./examples/cli-basics/)
+is exercised by a test, so a flag that drifts from its documentation fails CI.
 
 See [CHANGELOG.md](./CHANGELOG.md) for upgrade notes.
 

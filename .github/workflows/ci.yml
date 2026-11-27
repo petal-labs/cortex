@@ -70,6 +70,9 @@ jobs:
       - name: Vet
         run: go vet -tags sqlite_fts5 ./...
 
+      - name: Verify Go SDK example
+        run: go run -tags sqlite_fts5 ./examples/go-client
+
       - name: Format check
         shell: bash
         run: |

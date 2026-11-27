@@ -13,6 +13,7 @@ var (
 	ErrNotFound        = errors.New("not found")
 	ErrAlreadyExists   = errors.New("already exists")
 	ErrVersionConflict = errors.New("version conflict")
+	ErrInvalidInput    = errors.New("invalid input")
 )
 
 // Backend defines the interface for all storage operations.

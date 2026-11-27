@@ -19,6 +19,11 @@ func TestConformance(t *testing.T) {
 	}
 	defer db.Close()
 
+	// In-memory SQLite databases are per-connection; pin to 1 so concurrent
+	// conformance tests exercise the same database instance.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	backend := NewWithDB(db)
 	ctx := context.Background()
 	if err := backend.Migrate(ctx); err != nil {

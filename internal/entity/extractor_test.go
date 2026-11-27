@@ -54,6 +54,150 @@ func TestEntityExtractionSchemaObjectRoot(t *testing.T) {
 	}
 }
 
+// TestEntityExtractionSchemaStrictMode recursively validates entityExtractionSchema
+// against OpenAI strict structured-output constraints:
+// - Root must be an object
+// - Every object node must have "additionalProperties": false
+// - Every object node must list every key of "properties" in "required"
+func TestEntityExtractionSchemaStrictMode(t *testing.T) {
+	if !entityExtractionSchema.Strict {
+		t.Fatal("expected entityExtractionSchema.Strict to be true")
+	}
+
+	var root map[string]any
+	if err := json.Unmarshal(entityExtractionSchema.Schema, &root); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+
+	var validateNode func(path string, node map[string]any)
+	validateNode = func(path string, node map[string]any) {
+		isObject := false
+		switch typ := node["type"].(type) {
+		case string:
+			isObject = typ == "object"
+		case []any:
+			for _, item := range typ {
+				if s, ok := item.(string); ok && s == "object" {
+					isObject = true
+				}
+			}
+		}
+
+		if isObject {
+			ap, ok := node["additionalProperties"].(bool)
+			if !ok || ap {
+				t.Errorf("%s: object node must have additionalProperties: false, got %#v", path, node["additionalProperties"])
+			}
+
+			props, ok := node["properties"].(map[string]any)
+			if !ok {
+				t.Errorf("%s: object node must define properties", path)
+			} else {
+				reqRaw, ok := node["required"].([]any)
+				if !ok {
+					t.Errorf("%s: object node must define required array", path)
+				} else {
+					reqSet := make(map[string]bool, len(reqRaw))
+					for _, r := range reqRaw {
+						if s, ok := r.(string); ok {
+							reqSet[s] = true
+						}
+					}
+					for propName, propVal := range props {
+						if !reqSet[propName] {
+							t.Errorf("%s: property %q missing from required", path, propName)
+						}
+						if child, ok := propVal.(map[string]any); ok {
+							validateNode(path+"."+propName, child)
+						}
+					}
+					for reqName := range reqSet {
+						if _, exists := props[reqName]; !exists {
+							t.Errorf("%s: required field %q not present in properties", path, reqName)
+						}
+					}
+				}
+			}
+		}
+
+		if items, ok := node["items"].(map[string]any); ok {
+			validateNode(path+"[]", items)
+		}
+	}
+
+	validateNode("$", root)
+}
+
+func TestParseExtractionPayload_AttributesFormats(t *testing.T) {
+	t.Run("strict key-value array format", func(t *testing.T) {
+		response := `{
+			"entities": [
+				{
+					"name": "Jane Doe",
+					"type": "person",
+					"aliases": ["Jane"],
+					"summary": "Chief Technology Officer.",
+					"attributes": [
+						{"key": "role", "value": "CTO"},
+						{"key": "department", "value": "Engineering"}
+					],
+					"confidence": 0.95
+				}
+			],
+			"relationships": []
+		}`
+		entities, _, err := parseExtractionPayload(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 {
+			t.Fatalf("expected 1 entity, got %d", len(entities))
+		}
+		if entities[0].Attributes["role"] != "CTO" || entities[0].Attributes["department"] != "Engineering" {
+			t.Errorf("unexpected attributes: %+v", entities[0].Attributes)
+		}
+	})
+
+	t.Run("null and empty array attributes", func(t *testing.T) {
+		response := `{
+			"entities": [
+				{"name": "NullAttr", "type": "concept", "aliases": null, "summary": null, "attributes": null, "confidence": 0.8},
+				{"name": "EmptyAttr", "type": "concept", "aliases": [], "summary": "ok", "attributes": [], "confidence": 0.8}
+			],
+			"relationships": []
+		}`
+		entities, _, err := parseExtractionPayload(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 2 {
+			t.Fatalf("expected 2 entities, got %d", len(entities))
+		}
+		if len(entities[0].Attributes) != 0 {
+			t.Errorf("expected empty attributes for null, got %+v", entities[0].Attributes)
+		}
+		if len(entities[1].Attributes) != 0 {
+			t.Errorf("expected empty attributes for [], got %+v", entities[1].Attributes)
+		}
+	})
+
+	t.Run("legacy map object fallback format", func(t *testing.T) {
+		response := `{
+			"entities": [
+				{"name": "Legacy Entity", "type": "person", "attributes": {"role": "CTO"}, "confidence": 0.9}
+			],
+			"relationships": []
+		}`
+		entities, _, err := parseExtractionPayload(response)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(entities) != 1 || entities[0].Attributes["role"] != "CTO" {
+			t.Errorf("expected legacy map attributes role=CTO, got %+v", entities)
+		}
+	})
+}
+
 func TestParseExtractionPayload_WithTypedRelationships(t *testing.T) {
 	response := `{
 		"entities": [

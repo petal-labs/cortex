@@ -2,6 +2,9 @@ package conformance
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -219,6 +222,192 @@ func testContext(ctx context.Context, t *testing.T, b storage.Backend) {
 		_, err := b.GetContext(ctx, ns, "run-cleanup-key", &runID)
 		if err != storage.ErrNotFound {
 			t.Errorf("expected ErrNotFound after run cleanup, got %v", err)
+		}
+	})
+
+	t.Run("CleanupRunContextEmptyRunIDGuard", func(t *testing.T) {
+		persistentKey := "persistent-protected-key"
+		if err := b.SetContext(ctx, &types.ContextEntry{
+			Namespace: ns,
+			Key:       persistentKey,
+			Value:     "must-survive",
+		}, nil); err != nil {
+			t.Fatalf("SetContext persistent: %v", err)
+		}
+
+		// Calling CleanupRunContext with empty runID must fail and NOT delete persistent entries.
+		err := b.CleanupRunContext(ctx, ns, "")
+		if err == nil {
+			t.Fatal("expected error from CleanupRunContext with empty runID, got nil")
+		}
+		if !errors.Is(err, storage.ErrInvalidInput) {
+			t.Errorf("expected ErrInvalidInput, got %v", err)
+		}
+
+		got, err := b.GetContext(ctx, ns, persistentKey, nil)
+		if err != nil {
+			t.Fatalf("persistent context entry was wiped by CleanupRunContext(\"\"): %v", err)
+		}
+		if got.Value != "must-survive" {
+			t.Errorf("expected 'must-survive', got %v", got.Value)
+		}
+	})
+
+	t.Run("TTLReadExpiryBeforeGC", func(t *testing.T) {
+		const ttlNS = "conf-ctx-ttl-read"
+		past := time.Now().UTC().Add(-1 * time.Minute)
+		future := time.Now().UTC().Add(1 * time.Hour)
+
+		if err := b.SetContext(ctx, &types.ContextEntry{
+			Namespace:    ttlNS,
+			Key:          "expired-before-gc",
+			Value:        "stale",
+			TTLExpiresAt: &past,
+		}, nil); err != nil {
+			t.Fatalf("SetContext expired: %v", err)
+		}
+		if err := b.SetContext(ctx, &types.ContextEntry{
+			Namespace:    ttlNS,
+			Key:          "live-key",
+			Value:        "fresh",
+			TTLExpiresAt: &future,
+		}, nil); err != nil {
+			t.Fatalf("SetContext live: %v", err)
+		}
+
+		// Without calling CleanupExpiredContext, GetContext must immediately return ErrNotFound.
+		if _, err := b.GetContext(ctx, ttlNS, "expired-before-gc", nil); err != storage.ErrNotFound {
+			t.Errorf("expected ErrNotFound for expired entry before GC, got %v", err)
+		}
+
+		// ListContextKeys must exclude the expired entry before GC runs.
+		keys, _, err := b.ListContextKeys(ctx, ttlNS, nil, nil, "", 100)
+		if err != nil {
+			t.Fatalf("ListContextKeys: %v", err)
+		}
+		if len(keys) != 1 || keys[0] != "live-key" {
+			t.Errorf("expected only ['live-key'] from ListContextKeys, got %v", keys)
+		}
+
+		// SetContext treats the expired row as non-existent: expectedVersion=1 conflicts, expectedVersion=0 succeeds.
+		v1 := int64(1)
+		if err := b.SetContext(ctx, &types.ContextEntry{
+			Namespace: ttlNS,
+			Key:       "expired-before-gc",
+			Value:     "should-fail",
+		}, &v1); err != storage.ErrVersionConflict {
+			t.Errorf("expected ErrVersionConflict when updating expired key with expectedVersion=1, got %v", err)
+		}
+
+		v0 := int64(0)
+		recreated := &types.ContextEntry{
+			Namespace: ttlNS,
+			Key:       "expired-before-gc",
+			Value:     "reborn",
+		}
+		if err := b.SetContext(ctx, recreated, &v0); err != nil {
+			t.Fatalf("expected SetContext(expectedVersion=0) on expired key to succeed, got %v", err)
+		}
+		got, err := b.GetContext(ctx, ttlNS, "expired-before-gc", nil)
+		if err != nil {
+			t.Fatalf("GetContext recreated key: %v", err)
+		}
+		if got.Value != "reborn" || got.Version != 1 {
+			t.Errorf("expected recreated value='reborn' version=1, got value=%v version=%d", got.Value, got.Version)
+		}
+	})
+
+	t.Run("ConcurrentOptimisticConcurrency", func(t *testing.T) {
+		const concNS = "conf-ctx-conc"
+		const workers = 10
+
+		// Phase 1: N goroutines race to create the same key with expectedVersion=0.
+		// Exactly 1 must succeed and N-1 must return ErrVersionConflict.
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		results := make(chan error, workers)
+
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				<-start
+				v0 := int64(0)
+				err := b.SetContext(ctx, &types.ContextEntry{
+					Namespace: concNS,
+					Key:       "race-key",
+					Value:     fmt.Sprintf("init-%d", id),
+				}, &v0)
+				results <- err
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		close(results)
+
+		successes, conflicts := 0, 0
+		for err := range results {
+			switch {
+			case err == nil:
+				successes++
+			case errors.Is(err, storage.ErrVersionConflict):
+				conflicts++
+			default:
+				t.Errorf("unexpected error during concurrent create: %v", err)
+			}
+		}
+		if successes != 1 || conflicts != workers-1 {
+			t.Fatalf("concurrent create: expected 1 success and %d conflicts, got %d successes and %d conflicts",
+				workers-1, successes, conflicts)
+		}
+
+		// Phase 2: N goroutines race to update version 1 -> 2.
+		start2 := make(chan struct{})
+		results2 := make(chan error, workers)
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				<-start2
+				v1 := int64(1)
+				err := b.SetContext(ctx, &types.ContextEntry{
+					Namespace: concNS,
+					Key:       "race-key",
+					Value:     fmt.Sprintf("update-%d", id),
+				}, &v1)
+				results2 <- err
+			}(i)
+		}
+		close(start2)
+		wg.Wait()
+		close(results2)
+
+		successes, conflicts = 0, 0
+		for err := range results2 {
+			switch {
+			case err == nil:
+				successes++
+			case errors.Is(err, storage.ErrVersionConflict):
+				conflicts++
+			default:
+				t.Errorf("unexpected error during concurrent update: %v", err)
+			}
+		}
+		if successes != 1 || conflicts != workers-1 {
+			t.Fatalf("concurrent update: expected 1 success and %d conflicts, got %d successes and %d conflicts",
+				workers-1, successes, conflicts)
+		}
+
+		// Verify context_history has strictly unique versions [2, 1] (descending).
+		history, _, err := b.GetContextHistory(ctx, concNS, "race-key", nil, "", 100)
+		if err != nil {
+			t.Fatalf("GetContextHistory: %v", err)
+		}
+		if len(history) != 2 {
+			t.Fatalf("expected exactly 2 history entries, got %d", len(history))
+		}
+		if history[0].Version != 2 || history[1].Version != 1 {
+			t.Errorf("expected strictly unique versions [2, 1], got [%d, %d]", history[0].Version, history[1].Version)
 		}
 	})
 }

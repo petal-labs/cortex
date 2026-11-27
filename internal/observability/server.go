@@ -3,16 +3,22 @@ package observability
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
+// DefaultMetricsHost is the loopback host bound by default for the observability server.
+const DefaultMetricsHost = "127.0.0.1"
+
 // MetricsServer serves Prometheus metrics over HTTP.
 type MetricsServer struct {
 	server *http.Server
+	host   string
 	port   int
 
 	// readyCheck verifies dependencies are reachable (e.g. the storage
@@ -31,9 +37,19 @@ type ReadyCheck func(context.Context) error
 // defaultProbeTimeout bounds a single readiness probe.
 const defaultProbeTimeout = 2 * time.Second
 
-// NewMetricsServer creates a new metrics server on the specified port.
+// NewMetricsServer creates a new metrics server bound to 127.0.0.1 on the specified port.
 // readyCheck may be nil, in which case /ready always reports ready.
 func NewMetricsServer(port int, readyCheck ReadyCheck) *MetricsServer {
+	return NewMetricsServerWithHost(DefaultMetricsHost, port, readyCheck)
+}
+
+// NewMetricsServerWithHost creates a new metrics server bound to host:port.
+// An empty host defaults to 127.0.0.1.
+func NewMetricsServerWithHost(host string, port int, readyCheck ReadyCheck) *MetricsServer {
+	if host == "" {
+		host = DefaultMetricsHost
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
@@ -45,13 +61,17 @@ func NewMetricsServer(port int, readyCheck ReadyCheck) *MetricsServer {
 		w.Write([]byte("ok"))
 	})
 
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	s := &MetricsServer{
+		host: host,
 		port: port,
 		server: &http.Server{
-			Addr:         fmt.Sprintf(":%d", port),
-			Handler:      mux,
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: 10 * time.Second,
+			Addr:              addr,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       5 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       60 * time.Second,
 		},
 		readyCheck:   readyCheck,
 		probeTimeout: defaultProbeTimeout,
@@ -95,6 +115,7 @@ func (s *MetricsServer) Start() {
 	go func() {
 		if DefaultLogger != nil {
 			DefaultLogger.Logger.Info("starting metrics server",
+				zap.String("addr", s.server.Addr),
 				zap.Int("port", s.port),
 				zap.String("endpoint", "/metrics"),
 			)
@@ -116,4 +137,9 @@ func (s *MetricsServer) Shutdown(ctx context.Context) error {
 // Port returns the port the metrics server is listening on.
 func (s *MetricsServer) Port() int {
 	return s.port
+}
+
+// Addr returns the configured bind address (host:port) of the metrics server.
+func (s *MetricsServer) Addr() string {
+	return s.server.Addr
 }

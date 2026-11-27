@@ -583,6 +583,79 @@ func TestMergeSelfError(t *testing.T) {
 	}
 }
 
+func TestMergeEntitiesRelationshipsAndAliases(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	namespace := "test-ns"
+
+	target, err := engine.Create(ctx, namespace, "Acme Corporation", types.EntityTypeOrganization, &CreateOpts{
+		Aliases: []string{"Acme"},
+	})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	source, err := engine.Create(ctx, namespace, "ACME Corp.", types.EntityTypeOrganization, &CreateOpts{
+		Aliases: []string{"ACME", "Acme Co"},
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	shared, err := engine.Create(ctx, namespace, "Cloud Platform", types.EntityTypeProduct, nil)
+	if err != nil {
+		t.Fatalf("create shared: %v", err)
+	}
+	extra, err := engine.Create(ctx, namespace, "Partner Org", types.EntityTypeOrganization, nil)
+	if err != nil {
+		t.Fatalf("create extra: %v", err)
+	}
+
+	// Both source and target share "builds" -> Cloud Platform (overlapping relationship).
+	if _, err := engine.AddRelationship(ctx, namespace, target.Entity.ID, shared.Entity.ID, "builds", nil); err != nil {
+		t.Fatalf("add target->shared rel: %v", err)
+	}
+	if _, err := engine.AddRelationship(ctx, namespace, source.Entity.ID, shared.Entity.ID, "builds", nil); err != nil {
+		t.Fatalf("add source->shared rel: %v", err)
+	}
+	// Source has an additional relationship to extra.
+	if _, err := engine.AddRelationship(ctx, namespace, source.Entity.ID, extra.Entity.ID, "partners_with", nil); err != nil {
+		t.Fatalf("add source->extra rel: %v", err)
+	}
+
+	res, err := engine.Merge(ctx, namespace, source.Entity.ID, target.Entity.ID)
+	if err != nil {
+		t.Fatalf("Merge failed: %v", err)
+	}
+	if res.MergedRelationships != 2 {
+		t.Errorf("expected MergedRelationships == 2, got %d", res.MergedRelationships)
+	}
+
+	rels, err := engine.GetRelationships(ctx, namespace, target.Entity.ID, &GetRelationshipsOpts{
+		Direction: types.RelationshipDirectionOutgoing,
+	})
+	if err != nil {
+		t.Fatalf("GetRelationships: %v", err)
+	}
+	if len(rels) != 2 {
+		t.Fatalf("expected 2 outgoing relationships on kept entity, got %d", len(rels))
+	}
+
+	// Subsequent update on target must preserve merged aliases.
+	newSummary := "Consolidated organization"
+	if _, err := engine.Update(ctx, namespace, target.Entity.ID, UpdateOpts{Summary: &newSummary}); err != nil {
+		t.Fatalf("Update after merge: %v", err)
+	}
+	for _, alias := range []string{"Acme", "Acme Co", "ACME Corp."} {
+		resolved, err := engine.Resolve(ctx, namespace, alias)
+		if err != nil {
+			t.Errorf("expected alias %q to resolve after Update, got %v", alias, err)
+		} else if resolved.ID != target.Entity.ID {
+			t.Errorf("expected alias %q to resolve to %s, got %s", alias, target.Entity.ID, resolved.ID)
+		}
+	}
+}
+
 func TestExtractionQueue(t *testing.T) {
 	engine, backend := setupTestEngine(t)
 	defer backend.Close()

@@ -338,7 +338,78 @@ ALTER TABLE entity_extraction_queue ADD COLUMN next_retry_at INTEGER;
 INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', '3');
 `,
 	},
+	{
+		Version: 4,
+		Name:    "graph_rag_variant_b",
+		Up: `
+-- Opt-in graph extraction flag per collection (default false / 0).
+ALTER TABLE collections ADD COLUMN graph_enabled INTEGER NOT NULL DEFAULT 0;
+
+-- Composite covering indexes for bounded k-hop graph expansion.
+CREATE INDEX IF NOT EXISTS idx_entity_rels_ns_source ON entity_relationships(namespace, source_entity_id, confidence DESC, mention_count DESC);
+CREATE INDEX IF NOT EXISTS idx_entity_rels_ns_target ON entity_relationships(namespace, target_entity_id, confidence DESC, mention_count DESC);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_ns_entity_cov ON entity_mentions(namespace, source_type, entity_id, created_at DESC, source_id);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_ns_source_cov ON entity_mentions(namespace, source_type, source_id, entity_id);
+
+-- Update schema version
+INSERT OR REPLACE INTO cortex_metadata (key, value) VALUES ('schema_version', '4');
+`,
+	},
 }
+
+const relationshipsFTSDDL = `
+-- Variant B: FTS5 full-text index over relational triples (source, relation, target, description).
+CREATE VIRTUAL TABLE IF NOT EXISTS relationships_fts USING fts5(
+    relationship_id UNINDEXED,
+    namespace UNINDEXED,
+    source_name,
+    relation_type,
+    target_name,
+    description
+);
+
+CREATE TRIGGER IF NOT EXISTS relationships_fts_insert AFTER INSERT ON entity_relationships BEGIN
+    INSERT INTO relationships_fts(relationship_id, namespace, source_name, relation_type, target_name, description)
+    VALUES (
+        NEW.id,
+        NEW.namespace,
+        COALESCE((SELECT name FROM entities WHERE id = NEW.source_entity_id), ''),
+        REPLACE(NEW.relation_type, '_', ' '),
+        COALESCE((SELECT name FROM entities WHERE id = NEW.target_entity_id), ''),
+        COALESCE(NEW.description, '')
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS relationships_fts_delete AFTER DELETE ON entity_relationships BEGIN
+    DELETE FROM relationships_fts WHERE relationship_id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS relationships_fts_update AFTER UPDATE ON entity_relationships BEGIN
+    DELETE FROM relationships_fts WHERE relationship_id = OLD.id;
+    INSERT INTO relationships_fts(relationship_id, namespace, source_name, relation_type, target_name, description)
+    VALUES (
+        NEW.id,
+        NEW.namespace,
+        COALESCE((SELECT name FROM entities WHERE id = NEW.source_entity_id), ''),
+        REPLACE(NEW.relation_type, '_', ' '),
+        COALESCE((SELECT name FROM entities WHERE id = NEW.target_entity_id), ''),
+        COALESCE(NEW.description, '')
+    );
+END;
+
+-- Backfill any pre-existing relationships into relationships_fts.
+DELETE FROM relationships_fts;
+INSERT INTO relationships_fts(relationship_id, namespace, source_name, relation_type, target_name, description)
+SELECT r.id,
+       r.namespace,
+       COALESCE(s.name, ''),
+       REPLACE(r.relation_type, '_', ' '),
+       COALESCE(t.name, ''),
+       COALESCE(r.description, '')
+FROM entity_relationships r
+LEFT JOIN entities s ON s.id = r.source_entity_id
+LEFT JOIN entities t ON t.id = r.target_entity_id;
+`
 
 // runMigrations executes all pending migrations.
 func runMigrations(ctx context.Context, db *sql.DB) error {
@@ -390,6 +461,13 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 		if _, err := tx.ExecContext(ctx, m.Up); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to run migration %d (%s): %w", m.Version, m.Name, err)
+		}
+
+		if m.Name == "graph_rag_variant_b" && fts5Available {
+			if _, err := tx.ExecContext(ctx, relationshipsFTSDDL); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to create relationships_fts in migration %d: %w", m.Version, err)
+			}
 		}
 
 		// Update schema version

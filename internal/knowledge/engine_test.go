@@ -807,7 +807,34 @@ func (m *MockExtractionEnqueuer) EnqueueForExtraction(ctx context.Context, names
 }
 
 func TestExtractionEnqueuer(t *testing.T) {
-	t.Run("enqueues chunks for extraction on ingest", func(t *testing.T) {
+	t.Run("skips extraction when collection is not graph-enabled (opt-in default)", func(t *testing.T) {
+		engine, _ := setupTestEngine(t)
+		ctx := context.Background()
+		namespace := "test-ns"
+
+		enqueuer := NewMockExtractionEnqueuer()
+		engine.SetExtractionEnqueuer(enqueuer)
+
+		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
+			Name: "default-collection",
+		})
+		if err != nil {
+			t.Fatalf("failed to create collection: %v", err)
+		}
+		if col.GraphEnabled {
+			t.Fatal("expected GraphEnabled default to be false")
+		}
+
+		_, err = engine.Ingest(ctx, namespace, col.ID, "First paragraph. Second paragraph.", nil)
+		if err != nil {
+			t.Fatalf("failed to ingest: %v", err)
+		}
+		if enqueuer.callCount != 0 {
+			t.Errorf("expected 0 extraction calls on non-graph collection, got %d", enqueuer.callCount)
+		}
+	})
+
+	t.Run("enqueues chunks for extraction on ingest when graph_enabled", func(t *testing.T) {
 		engine, _ := setupTestEngine(t)
 		ctx := context.Background()
 		namespace := "test-ns"
@@ -816,9 +843,10 @@ func TestExtractionEnqueuer(t *testing.T) {
 		enqueuer := NewMockExtractionEnqueuer()
 		engine.SetExtractionEnqueuer(enqueuer)
 
-		// Create collection
+		// Create opt-in graph-enabled collection
 		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
-			Name: "test-collection",
+			Name:         "test-collection",
+			GraphEnabled: true,
 		})
 		if err != nil {
 			t.Fatalf("failed to create collection: %v", err)
@@ -857,7 +885,8 @@ func TestExtractionEnqueuer(t *testing.T) {
 
 		// Create collection
 		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
-			Name: "test-collection",
+			Name:         "test-collection",
+			GraphEnabled: true,
 		})
 		if err != nil {
 			t.Fatalf("failed to create collection: %v", err)
@@ -878,9 +907,10 @@ func TestExtractionEnqueuer(t *testing.T) {
 		enqueuer := NewMockExtractionEnqueuer()
 		engine.SetExtractionEnqueuer(enqueuer)
 
-		// Create collection
+		// Create graph-enabled collection
 		col, err := engine.CreateCollection(ctx, namespace, CreateCollectionOpts{
-			Name: "test-collection",
+			Name:         "test-collection",
+			GraphEnabled: true,
 		})
 		if err != nil {
 			t.Fatalf("failed to create collection: %v", err)
@@ -1199,5 +1229,134 @@ func TestIngestNoEmbeddingProvider(t *testing.T) {
 	}
 	if result.ChunksCreated == 0 {
 		t.Error("expected at least one chunk")
+	}
+}
+
+func TestSearchModeGraph(t *testing.T) {
+	engine, backend := setupTestEngine(t)
+	defer backend.Close()
+
+	ctx := context.Background()
+	ns := "graph-ns"
+
+	col, err := engine.CreateCollection(ctx, ns, CreateCollectionOpts{
+		Name:         "architecture",
+		Description:  "Architecture docs",
+		GraphEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if !col.GraphEnabled {
+		t.Fatal("expected collection GraphEnabled=true")
+	}
+
+	enqueuer := NewMockExtractionEnqueuer()
+	engine.SetExtractionEnqueuer(enqueuer)
+
+	// Ingest two documents: doc1 mentions Gateway -> PaymentsDB; doc2 mentions PaymentsDB -> AuroraRegion.
+	if _, err := engine.Ingest(ctx, ns, col.ID, "Checkout Gateway persists transaction state in PaymentsDB.", &IngestOpts{Title: "Gateway Doc"}); err != nil {
+		t.Fatalf("Ingest doc1: %v", err)
+	}
+	if _, err := engine.Ingest(ctx, ns, col.ID, "PaymentsDB is replicated to AuroraRegion us-west-2 for disaster recovery.", &IngestOpts{Title: "DR Doc"}); err != nil {
+		t.Fatalf("Ingest doc2: %v", err)
+	}
+	if len(enqueuer.items) < 2 {
+		t.Fatalf("expected at least 2 enqueued chunks, got %d", len(enqueuer.items))
+	}
+	chunk1ID := enqueuer.items[0].sourceID
+	chunk2ID := enqueuer.items[len(enqueuer.items)-1].sourceID
+
+	now := time.Now().UTC()
+	entGateway := &types.Entity{
+		ID: "ent-gateway", Namespace: ns, Name: "Checkout Gateway", Type: types.EntityTypeProduct,
+		Summary: "Handles checkout requests", FirstSeenAt: now, LastSeenAt: now,
+	}
+	entDB := &types.Entity{
+		ID: "ent-paymentsdb", Namespace: ns, Name: "PaymentsDB", Type: types.EntityTypeProduct,
+		Summary: "Primary transactional database", FirstSeenAt: now, LastSeenAt: now,
+	}
+	entRegion := &types.Entity{
+		ID: "ent-aurora", Namespace: ns, Name: "AuroraRegion", Type: types.EntityTypeLocation,
+		Summary: "Disaster recovery AWS region", FirstSeenAt: now, LastSeenAt: now,
+	}
+	for _, ent := range []*types.Entity{entGateway, entDB, entRegion} {
+		if err := backend.UpsertEntity(ctx, ent); err != nil {
+			t.Fatalf("UpsertEntity %s: %v", ent.ID, err)
+		}
+	}
+
+	for _, rel := range []*types.EntityRelationship{
+		{
+			ID: "rel-1", Namespace: ns, SourceEntityID: entGateway.ID, TargetEntityID: entDB.ID,
+			RelationType: "persists_in", Description: "Checkout Gateway persists orders in PaymentsDB",
+			Confidence: 0.95, MentionCount: 1, FirstSeenAt: now, LastSeenAt: now,
+		},
+		{
+			ID: "rel-2", Namespace: ns, SourceEntityID: entDB.ID, TargetEntityID: entRegion.ID,
+			RelationType: "replicated_to", Description: "PaymentsDB replicated to AuroraRegion",
+			Confidence: 0.95, MentionCount: 1, FirstSeenAt: now, LastSeenAt: now,
+		},
+	} {
+		if err := backend.UpsertRelationship(ctx, rel); err != nil {
+			t.Fatalf("UpsertRelationship %s: %v", rel.ID, err)
+		}
+	}
+
+	for _, m := range []*types.EntityMention{
+		{ID: "m1", EntityID: entGateway.ID, Namespace: ns, SourceType: "chunk", SourceID: chunk1ID, CreatedAt: now},
+		{ID: "m2", EntityID: entDB.ID, Namespace: ns, SourceType: "chunk", SourceID: chunk1ID, CreatedAt: now},
+		{ID: "m3", EntityID: entDB.ID, Namespace: ns, SourceType: "chunk", SourceID: chunk2ID, CreatedAt: now},
+		{ID: "m4", EntityID: entRegion.ID, Namespace: ns, SourceType: "chunk", SourceID: chunk2ID, CreatedAt: now},
+	} {
+		if err := backend.InsertMention(ctx, m); err != nil {
+			t.Fatalf("InsertMention %s: %v", m.ID, err)
+		}
+	}
+
+	res, err := engine.Search(ctx, ns, "Checkout Gateway disaster recovery", &SearchOpts{
+		TopK:                5,
+		SearchMode:          SearchModeGraph,
+		IncludeGraphContext: true,
+		MaxHops:             2,
+	})
+	if err != nil {
+		t.Fatalf("Search(graph): %v", err)
+	}
+	if len(res.Results) == 0 {
+		t.Fatal("expected graph search results, got 0")
+	}
+	if res.GraphContext == nil {
+		t.Fatal("expected non-nil GraphContext when IncludeGraphContext=true")
+	}
+	if len(res.GraphContext.Entities) == 0 {
+		t.Error("expected non-empty GraphContext.Entities")
+	}
+	if len(res.GraphContext.Relationships) == 0 {
+		t.Error("expected non-empty GraphContext.Relationships")
+	}
+
+	// Verify 2-hop chunk (d2) was retrieved via PaymentsDB bridge.
+	foundD2 := false
+	for _, r := range res.Results {
+		if r.Chunk != nil && r.Chunk.ID == chunk2ID {
+			foundD2 = true
+		}
+	}
+	if !foundD2 {
+		t.Errorf("expected multi-hop chunk %s in graph search results", chunk2ID)
+	}
+
+	// Verify IncludeGraphContext=false omits GraphContext.
+	resNoCtx, err := engine.Search(ctx, ns, "Checkout Gateway", &SearchOpts{
+		TopK:                5,
+		SearchMode:          SearchModeGraph,
+		IncludeGraphContext: false,
+	})
+	if err != nil {
+		t.Fatalf("Search(graph, no ctx): %v", err)
+	}
+	if resNoCtx.GraphContext != nil {
+		t.Errorf("expected nil GraphContext when IncludeGraphContext=false, got %+v", resNoCtx.GraphContext)
 	}
 }

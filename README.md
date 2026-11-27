@@ -21,13 +21,13 @@ Cortex is a memory and knowledge service for AI agents. It provides persistent c
 **Four Memory Primitives:**
 
 - **Conversation Memory** — Agent dialogue history with semantic search and auto-summarization
-- **Knowledge Store** — Vector-indexed documents with hybrid search (semantic + full-text)
+- **Knowledge Store** — Vector-indexed documents with hybrid (semantic + full-text) and zero-LLM Graph RAG (`graph`) search
 - **Workflow Context** — Key-value state that persists across tasks and runs
 - **Entity Memory** — Auto-extracted knowledge graph of people, organizations, and concepts
 
 **Production Ready:**
 
-- SQLite + vec0 for single-node deployments (zero infrastructure)
+- SQLite + vec0 (WAL read/write pool split) for single-node deployments (zero infrastructure; up to ~25K chunks/namespace)
 - PostgreSQL + pgvector for production scale
 - Prometheus metrics and structured logging
 - Backup, export, and garbage collection
@@ -73,12 +73,13 @@ extract it, and add the extracted folder to your PATH.
 
 ### Build from Source
 
-Requires Go 1.24+ and CGO enabled.
+Requires Go 1.24+ and CGO enabled. Include `-tags sqlite_fts5` so SQLite FTS5
+full-text and relationship search indexes are compiled in:
 
 ```bash
 git clone https://github.com/petal-labs/cortex.git
 cd cortex
-go build -o cortex ./cmd/cortex
+go build -tags sqlite_fts5 -o cortex ./cmd/cortex
 ```
 
 ### Verify Installation
@@ -369,8 +370,8 @@ Cortex exposes 19 MCP tools across the four memory primitives:
 |------|-------------|
 | `knowledge_ingest` | Ingest a document with chunking |
 | `knowledge_bulk_ingest` | Batch ingest multiple documents |
-| `knowledge_search` | Hybrid search (vector + full-text) |
-| `knowledge_collections` | Create, list, delete collections |
+| `knowledge_search` | Vector, full-text, hybrid, or zero-LLM Graph RAG search |
+| `knowledge_collections` | Create (with optional `graph_enabled`), list, delete collections |
 
 ### Context
 
@@ -400,12 +401,12 @@ to be silently remapped to an unrelated one.
 ### Response Contract
 
 Every tool response is a declared, versioned JSON shape. Each top-level
-response carries `schema_version`, so clients can feature-detect contract
-changes instead of guessing:
+response carries `schema_version` (currently `2`), so clients can feature-detect
+contract changes instead of guessing:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "results": [
     {
       "chunk": {
@@ -423,10 +424,21 @@ changes instead of guessing:
       "source": "test://src"
     }
   ],
+  "graph_context": {
+    "entities": [
+      { "id": "ent-1", "name": "PaymentsDB", "type": "product", "score": 0.42 }
+    ],
+    "relationships": [
+      { "source": "Checkout Gateway", "target": "PaymentsDB", "relation_type": "persists_in", "confidence": 0.95, "score": 0.61 }
+    ]
+  },
   "query": "chunk",
   "total_found": 1
 }
 ```
+
+(`graph_context` is optional and included on `knowledge_search` only when
+`include_graph_context: true` is requested in `search_mode: "graph"`.)
 
 The contract guarantees:
 
@@ -511,9 +523,9 @@ cortex serve [flags]
 ```bash
 cortex knowledge ingest --collection <name> --title <title> --file <path>
 cortex knowledge ingest-dir --collection <name> --dir <path> --pattern "*.md"
-cortex knowledge search <query> [--collection <name>] [--mode hybrid]
+cortex knowledge search <query> [--collection <name>] [--mode hybrid|graph] [--graph-context] [--max-hops 2]
 cortex knowledge collections [--namespace <ns>]
-cortex knowledge create-collection --name <name> [--description <desc>]
+cortex knowledge create-collection --name <name> [--description <desc>] [--graph-enabled]
 cortex knowledge stats [--namespace <ns>]
 ```
 
@@ -570,17 +582,29 @@ cortex tui [--namespace <ns>]
 
 ## Search Modes
 
-Cortex supports three search modes:
+Cortex supports four search modes:
 
 | Mode | Description |
 |------|-------------|
 | `vector` | Semantic similarity using embeddings (default) |
 | `text` | Full-text search using BM25 (SQLite) or ts_rank (PostgreSQL) |
 | `hybrid` | Combines vector and full-text using Reciprocal Rank Fusion |
+| `graph` | Zero-LLM-at-query-time Vector-Graph RAG (hybrid + relationship FTS seeding + bipartite Personalized PageRank over the entity graph) |
 
 ```bash
 cortex knowledge search "machine learning" --mode hybrid
+cortex knowledge search "how services connect" --mode graph --graph-context --max-hops 2
 ```
+
+Graph RAG extraction is **opt-in per collection** (`graph_enabled: false` by
+default) so ingestion only runs entity/relationship extraction where needed:
+
+```bash
+cortex knowledge create-collection --name architecture --description "Architecture docs" --graph-enabled
+```
+
+On SQLite (WAL read/write pool split), Graph RAG is tuned for up to ~25,000
+chunks per namespace; use PostgreSQL + `pgvector` for larger corpora.
 
 ## Namespaces
 
@@ -607,6 +631,9 @@ When `metrics_enabled: true`, Cortex exposes metrics at `:9811/metrics`:
 - `cortex_search_latency_seconds` — Search-specific latency
 - `cortex_embedding_requests_total` — Embedding API calls
 - `cortex_extraction_queue_size` — Entity extraction queue depth
+- `cortex_graph_ppr_duration_seconds` — Personalized PageRank solve latency for `graph` search
+- `cortex_graph_subgraph_nodes` — Number of nodes in expanded Graph RAG subgraphs
+- `cortex_graph_subgraph_edges` — Number of edges in expanded Graph RAG subgraphs
 
 ### Health and Readiness
 
@@ -684,7 +711,7 @@ Docker provider is available.
 ### Build
 
 ```bash
-go build -o cortex ./cmd/cortex
+go build -tags sqlite_fts5 -o cortex ./cmd/cortex
 ```
 
 ## Versioning

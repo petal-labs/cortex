@@ -227,3 +227,27 @@ func TestNoZeroTimestampsAcrossGoldenShapes(t *testing.T) {
 		})
 	}
 }
+
+// TestGraphContextCollectionsNotNull verifies an empty GraphContext with nil
+// Entities and Relationships slices marshals as [] rather than null.
+func TestGraphContextCollectionsNotNull(t *testing.T) {
+	res := NewKnowledgeSearch(&knowledge.SearchResult{
+		Results:      []*types.ChunkResult{},
+		GraphContext: &types.GraphContext{},
+		Query:        "multi-hop",
+	})
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"entities":[]`) {
+		t.Errorf("expected entities to be [], got: %s", s)
+	}
+	if !strings.Contains(s, `"relationships":[]`) {
+		t.Errorf("expected relationships to be [], got: %s", s)
+	}
+	if strings.Contains(s, "null") {
+		t.Errorf("unexpected null in response: %s", s)
+	}
+}

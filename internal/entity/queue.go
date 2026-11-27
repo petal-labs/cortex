@@ -285,6 +285,7 @@ func (q *QueueProcessor) processExtractedEntity(
 	}
 
 	var entity *types.Entity
+	summary := buildEntitySummary(extracted)
 
 	if resolved.Entity != nil {
 		// Update existing entity
@@ -298,9 +299,12 @@ func (q *QueueProcessor) processExtractedEntity(
 			entity.Attributes[k] = v
 		}
 
-		// Update via engine
+		// Update via engine (populate summary if previously empty so entity_embeddings gets indexed)
 		updateOpts := UpdateOpts{
 			Attributes: entity.Attributes,
+		}
+		if entity.Summary == "" && summary != "" {
+			updateOpts.Summary = &summary
 		}
 
 		entity, err = q.engine.Update(ctx, namespace, entity.ID, updateOpts)
@@ -316,15 +320,22 @@ func (q *QueueProcessor) processExtractedEntity(
 			}
 		}
 	} else {
-		// Create new entity
+		// Create new entity (providing Summary triggers automatic embedding into entity_embeddings)
 		result, err := q.engine.Create(ctx, namespace, extracted.Name, ToEntityType(string(extracted.Type)), &CreateOpts{
 			Aliases:    extracted.Aliases,
+			Summary:    summary,
 			Attributes: extracted.Attributes,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create entity: %w", err)
 		}
 		entity = result.Entity
+
+		// Bounded semantic synonymy edges (top-3 nearest neighbors with cosine >= 0.85)
+		// bridge lexical variations like "K8s" <-> "Kubernetes" without O(E^2) pairwise scans.
+		if result.Created && summary != "" {
+			q.linkSemanticSynonyms(ctx, namespace, entity)
+		}
 	}
 
 	// Record mention
@@ -337,6 +348,62 @@ func (q *QueueProcessor) processExtractedEntity(
 	}
 
 	return nil
+}
+
+const (
+	synonymSearchTopK      = 4 // Top-3 peers + self
+	synonymCosineThreshold = 0.85
+)
+
+func (q *QueueProcessor) linkSemanticSynonyms(ctx context.Context, namespace string, created *types.Entity) {
+	if created == nil || created.Summary == "" || q.engine.embedding == nil {
+		return
+	}
+	res, err := q.engine.Search(ctx, namespace, created.Name+": "+created.Summary, &SearchOpts{
+		TopK:       synonymSearchTopK,
+		MinScore:   synonymCosineThreshold,
+		SearchMode: SearchModeVector,
+	})
+	if err != nil || res == nil {
+		return
+	}
+	linked := 0
+	for _, hit := range res.Results {
+		if hit == nil || hit.Entity == nil || hit.Entity.ID == created.ID {
+			continue
+		}
+		if hit.Score < synonymCosineThreshold {
+			continue
+		}
+		_, _ = q.engine.AddRelationship(ctx, namespace, created.ID, hit.Entity.ID, "synonym_of", &RelationshipOpts{
+			Description: fmt.Sprintf("Semantic synonym of %s", hit.Entity.Name),
+			Confidence:  hit.Score,
+		})
+		linked++
+		if linked >= 3 {
+			break
+		}
+	}
+}
+
+func buildEntitySummary(extracted *ExtractedEntity) string {
+	if s := strings.TrimSpace(extracted.Summary); s != "" {
+		return s
+	}
+	var parts []string
+	parts = append(parts, fmt.Sprintf("%s (%s)", extracted.Name, extracted.Type))
+	if len(extracted.Attributes) > 0 {
+		attrParts := make([]string, 0, len(extracted.Attributes))
+		for k, v := range extracted.Attributes {
+			if strings.TrimSpace(v) != "" {
+				attrParts = append(attrParts, fmt.Sprintf("%s: %s", k, v))
+			}
+		}
+		if len(attrParts) > 0 {
+			parts = append(parts, strings.Join(attrParts, "; "))
+		}
+	}
+	return strings.Join(parts, " — ")
 }
 
 // processExtractedRelationship creates or updates a relationship.

@@ -16,6 +16,7 @@ import (
 	"github.com/petal-labs/cortex/internal/embedding"
 	"github.com/petal-labs/cortex/internal/entity"
 	"github.com/petal-labs/cortex/internal/knowledge"
+	"github.com/petal-labs/cortex/internal/server/dto"
 	"github.com/petal-labs/cortex/internal/storage/sqlite"
 	"github.com/petal-labs/cortex/pkg/types"
 )
@@ -1439,7 +1440,7 @@ func TestStructuredContentEmitted(t *testing.T) {
 	if err := json.Unmarshal(structuredJSON, &probe); err != nil {
 		t.Fatalf("structuredContent not an object: %v", err)
 	}
-	if probe.SchemaVersion != 1 || probe.ThreadID != "thread-1" {
+	if probe.SchemaVersion != dto.SchemaVersion || probe.ThreadID != "thread-1" {
 		t.Errorf("structuredContent mismatch: %+v", probe)
 	}
 
@@ -1447,7 +1448,172 @@ func TestStructuredContentEmitted(t *testing.T) {
 	if err := json.Unmarshal([]byte(getTextContent(result)), &probe); err != nil {
 		t.Fatalf("text fallback not valid JSON: %v", err)
 	}
-	if probe.SchemaVersion != 1 || probe.ThreadID != "thread-1" {
+	if probe.SchemaVersion != dto.SchemaVersion || probe.ThreadID != "thread-1" {
 		t.Errorf("text fallback mismatch: %+v", probe)
+	}
+}
+
+func TestKnowledgeCollectionsGraphEnabled(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Default collection has graph_enabled=false.
+	defRes, err := srv.handleKnowledgeCollections(ctx, makeToolRequest("knowledge_collections", map[string]any{
+		"namespace": "test-ns",
+		"action":    "create",
+		"name":      "default-col",
+	}))
+	if err != nil {
+		t.Fatalf("create default collection: %v", err)
+	}
+	if defRes.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(defRes))
+	}
+	var defCol struct {
+		SchemaVersion int  `json:"schema_version"`
+		GraphEnabled  bool `json:"graph_enabled"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(defRes)), &defCol); err != nil {
+		t.Fatalf("unmarshal default col: %v", err)
+	}
+	if defCol.SchemaVersion != dto.SchemaVersion {
+		t.Errorf("expected schema_version %d, got %d", dto.SchemaVersion, defCol.SchemaVersion)
+	}
+	if defCol.GraphEnabled {
+		t.Error("expected default collection graph_enabled=false")
+	}
+
+	// Opt-in collection with graph_enabled=true.
+	optRes, err := srv.handleKnowledgeCollections(ctx, makeToolRequest("knowledge_collections", map[string]any{
+		"namespace":     "test-ns",
+		"action":        "create",
+		"name":          "graph-col",
+		"graph_enabled": true,
+	}))
+	if err != nil {
+		t.Fatalf("create graph collection: %v", err)
+	}
+	if optRes.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(optRes))
+	}
+	var optCol struct {
+		ID           string `json:"id"`
+		GraphEnabled bool   `json:"graph_enabled"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(optRes)), &optCol); err != nil {
+		t.Fatalf("unmarshal graph col: %v", err)
+	}
+	if !optCol.GraphEnabled {
+		t.Error("expected opt-in collection graph_enabled=true")
+	}
+
+	// Verify list reflects graph_enabled values.
+	listRes, err := srv.handleKnowledgeCollections(ctx, makeToolRequest("knowledge_collections", map[string]any{
+		"namespace": "test-ns",
+		"action":    "list",
+	}))
+	if err != nil {
+		t.Fatalf("list collections: %v", err)
+	}
+	var listData struct {
+		Collections []struct {
+			Name         string `json:"name"`
+			GraphEnabled bool   `json:"graph_enabled"`
+		} `json:"collections"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(listRes)), &listData); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, c := range listData.Collections {
+		seen[c.Name] = c.GraphEnabled
+	}
+	if seen["default-col"] {
+		t.Error("list: expected default-col graph_enabled=false")
+	}
+	if !seen["graph-col"] {
+		t.Error("list: expected graph-col graph_enabled=true")
+	}
+}
+
+func TestKnowledgeSearchGraphMode(t *testing.T) {
+	srv := testServer(t, "")
+	ctx := context.Background()
+
+	// Create collection and ingest a document.
+	colRes, err := srv.handleKnowledgeCollections(ctx, makeToolRequest("knowledge_collections", map[string]any{
+		"namespace":     "test-ns",
+		"action":        "create",
+		"name":          "graph-docs",
+		"graph_enabled": true,
+	}))
+	if err != nil || colRes.IsError {
+		t.Fatalf("create collection failed: %v / %s", err, getTextContent(colRes))
+	}
+	var col struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(colRes)), &col); err != nil {
+		t.Fatalf("unmarshal collection: %v", err)
+	}
+
+	ingRes, err := srv.handleKnowledgeIngest(ctx, makeToolRequest("knowledge_ingest", map[string]any{
+		"namespace":     "test-ns",
+		"collection_id": col.ID,
+		"title":         "Checkout Service",
+		"content":       "Checkout Gateway stores order state in PaymentsDB.",
+	}))
+	if err != nil || ingRes.IsError {
+		t.Fatalf("ingest failed: %v / %s", err, getTextContent(ingRes))
+	}
+
+	// Invalid max_hops must be rejected with a tool error.
+	for _, bad := range []float64{-1, 3} {
+		badRes, err := srv.handleKnowledgeSearch(ctx, makeToolRequest("knowledge_search", map[string]any{
+			"namespace":   "test-ns",
+			"query":       "Checkout Gateway",
+			"search_mode": "graph",
+			"max_hops":    bad,
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error for max_hops=%v: %v", bad, err)
+		}
+		if !badRes.IsError {
+			t.Errorf("expected tool error for invalid max_hops=%v, got success: %s", bad, getTextContent(badRes))
+		}
+	}
+
+	// Valid graph search with include_graph_context=true.
+	searchRes, err := srv.handleKnowledgeSearch(ctx, makeToolRequest("knowledge_search", map[string]any{
+		"namespace":             "test-ns",
+		"query":                 "Checkout Gateway",
+		"search_mode":           "graph",
+		"include_graph_context": true,
+		"max_hops":              float64(2),
+		"top_k":                 float64(5),
+	}))
+	if err != nil {
+		t.Fatalf("handleKnowledgeSearch(graph): %v", err)
+	}
+	if searchRes.IsError {
+		t.Fatalf("unexpected tool error: %s", getTextContent(searchRes))
+	}
+
+	var resp struct {
+		SchemaVersion int               `json:"schema_version"`
+		Results       []any             `json:"results"`
+		GraphContext  *dto.GraphContext `json:"graph_context"`
+	}
+	if err := json.Unmarshal([]byte(getTextContent(searchRes)), &resp); err != nil {
+		t.Fatalf("unmarshal search response: %v", err)
+	}
+	if resp.SchemaVersion != dto.SchemaVersion {
+		t.Errorf("expected schema_version=%d, got %d", dto.SchemaVersion, resp.SchemaVersion)
+	}
+	if len(resp.Results) == 0 {
+		t.Error("expected at least one result from graph search")
+	}
+	if resp.GraphContext == nil {
+		t.Error("expected non-nil graph_context when include_graph_context=true")
 	}
 }

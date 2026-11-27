@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "collection_id": "col-1",
   "total_documents": 2,
   "succeeded": 1,

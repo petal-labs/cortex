@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "document_id": "doc-1",
   "chunks_created": 3,
   "collection_id": "col-1"

@@ -44,6 +44,23 @@ func buildMigrations(dimensions int) ([]Migration, error) {
 				`ALTER TABLE extraction_queue ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ`,
 			},
 		},
+		{
+			Version: 3,
+			Name:    "graph_rag_variant_b",
+			Up: []string{
+				`ALTER TABLE collections ADD COLUMN IF NOT EXISTS graph_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+				`CREATE INDEX IF NOT EXISTS idx_entity_rels_ns_source ON entity_relationships(namespace, source_entity_id, confidence DESC, mention_count DESC)`,
+				`CREATE INDEX IF NOT EXISTS idx_entity_rels_ns_target ON entity_relationships(namespace, target_entity_id, confidence DESC, mention_count DESC)`,
+				`CREATE INDEX IF NOT EXISTS idx_entity_mentions_ns_entity_cov ON entity_mentions(namespace, source_type, entity_id, created_at DESC) INCLUDE (source_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_entity_mentions_ns_source_cov ON entity_mentions(namespace, source_type, source_id) INCLUDE (entity_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_entity_aliases_prefix ON entity_aliases(namespace, LOWER(alias) text_pattern_ops)`,
+				`ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS search_tsvector tsvector
+				 GENERATED ALWAYS AS (
+				     to_tsvector('english', REPLACE(COALESCE(relation_type, ''), '_', ' ') || ' ' || COALESCE(description, ''))
+				 ) STORED`,
+				`CREATE INDEX IF NOT EXISTS idx_relationships_fts ON entity_relationships USING GIN (search_tsvector)`,
+			},
+		},
 	}, nil
 }
 

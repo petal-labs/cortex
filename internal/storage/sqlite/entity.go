@@ -126,7 +126,7 @@ func (b *Backend) getEntity(ctx context.Context, where string, args ...any) (*ty
 	var firstSeenAtUnix, lastSeenAtUnix int64
 	var entityType string
 
-	err := b.db.QueryRowContext(ctx, `
+	err := b.reader().QueryRowContext(ctx, `
 		SELECT id, namespace, name, type, aliases, summary, attributes, metadata,
 		       mention_count, first_seen_at, last_seen_at
 		FROM entities
@@ -171,7 +171,7 @@ func (b *Backend) getEntity(ctx context.Context, where string, args ...any) (*ty
 // ResolveAlias looks up an entity by an alias.
 func (b *Backend) ResolveAlias(ctx context.Context, namespace, alias string) (*types.Entity, error) {
 	var entityID string
-	err := b.db.QueryRowContext(ctx, `
+	err := b.reader().QueryRowContext(ctx, `
 		SELECT entity_id FROM entity_aliases
 		WHERE namespace = ? AND alias = ?
 	`, namespace, strings.ToLower(alias)).Scan(&entityID)
@@ -217,7 +217,7 @@ func (b *Backend) SearchEntities(ctx context.Context, namespace string, embeddin
 	query += " ORDER BY distance ASC LIMIT ?"
 	args = append(args, opts.TopK)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search entities: %w", err)
 	}
@@ -334,7 +334,7 @@ func (b *Backend) ListEntities(ctx context.Context, namespace string, opts stora
 	query += " LIMIT ?"
 	args = append(args, opts.Limit+1)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to query entities: %w", err)
 	}
@@ -559,7 +559,7 @@ func (b *Backend) GetMentions(ctx context.Context, entityID string, limit int) (
 		limit = 20
 	}
 
-	rows, err := b.db.QueryContext(ctx, `
+	rows, err := b.reader().QueryContext(ctx, `
 		SELECT id, entity_id, namespace, source_type, source_id, context, snippet, created_at
 		FROM entity_mentions
 		WHERE entity_id = ?
@@ -686,7 +686,7 @@ func (b *Backend) GetRelationships(ctx context.Context, namespace, entityID stri
 		ORDER BY mention_count DESC, last_seen_at DESC
 	`
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query relationships: %w", err)
 	}

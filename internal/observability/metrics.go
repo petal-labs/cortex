@@ -27,6 +27,11 @@ type Metrics struct {
 
 	// Storage metrics
 	StorageOperationDuration *prometheus.HistogramVec
+
+	// Graph RAG metrics
+	GraphPPRDuration   prometheus.Histogram
+	GraphSubgraphNodes prometheus.Histogram
+	GraphSubgraphEdges prometheus.Histogram
 }
 
 // QueueStatsProvider is an interface for getting extraction queue statistics.
@@ -115,6 +120,33 @@ func NewMetrics(queueStats QueueStatsProvider) *Metrics {
 			},
 			[]string{"backend", "operation"},
 		),
+
+		// cortex_graph_ppr_duration_seconds - Pure-Go PPR execution latency
+		GraphPPRDuration: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "cortex_graph_ppr_duration_seconds",
+				Help:    "Personalized PageRank execution latency in seconds",
+				Buckets: []float64{0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05},
+			},
+		),
+
+		// cortex_graph_subgraph_nodes - Number of nodes in local PPR subgraph
+		GraphSubgraphNodes: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "cortex_graph_subgraph_nodes",
+				Help:    "Number of vertices in local Graph RAG PPR subgraph",
+				Buckets: []float64{0, 10, 50, 100, 250, 500, 1000, 2000},
+			},
+		),
+
+		// cortex_graph_subgraph_edges - Number of edges in local PPR subgraph
+		GraphSubgraphEdges: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "cortex_graph_subgraph_edges",
+				Help:    "Number of edges in local Graph RAG PPR subgraph",
+				Buckets: []float64{0, 10, 50, 100, 250, 500, 1000, 2500, 5000},
+			},
+		),
 	}
 
 	// Register gauge funcs for queue metrics
@@ -165,6 +197,16 @@ func (m *Metrics) RecordExtraction(status string) {
 // RecordStorageOperation records a storage backend operation metric.
 func (m *Metrics) RecordStorageOperation(backend, operation string, durationSeconds float64) {
 	m.StorageOperationDuration.WithLabelValues(backend, operation).Observe(durationSeconds)
+}
+
+// RecordGraphSearch records Graph RAG PPR duration and local subgraph size.
+func (m *Metrics) RecordGraphSearch(pprDurationSeconds float64, nodes, edges int) {
+	if m == nil {
+		return
+	}
+	m.GraphPPRDuration.Observe(pprDurationSeconds)
+	m.GraphSubgraphNodes.Observe(float64(nodes))
+	m.GraphSubgraphEdges.Observe(float64(edges))
 }
 
 // DefaultMetrics is the global metrics instance used when metrics are enabled.

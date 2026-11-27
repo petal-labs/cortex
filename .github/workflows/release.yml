@@ -44,7 +44,7 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           COMMIT=${GITHUB_SHA::7}
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex ./cmd/cortex
+          go build -tags sqlite_fts5 -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex ./cmd/cortex
 
       - name: Create archive
         run: |
@@ -88,7 +88,7 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           COMMIT=${GITHUB_SHA::7}
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex ./cmd/cortex
+          go build -tags sqlite_fts5 -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex ./cmd/cortex
 
       - name: Create archive
         run: |
@@ -142,7 +142,7 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           COMMIT=${GITHUB_SHA::7}
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex.exe ./cmd/cortex
+          go build -tags sqlite_fts5 -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" -o cortex.exe ./cmd/cortex
 
       - name: Create archive
         shell: bash

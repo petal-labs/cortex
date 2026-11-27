@@ -33,6 +33,9 @@ type Backend interface {
 	// Hybrid search operations (optional)
 	HybridSearch
 
+	// Graph RAG traversal, FTS relationship seeding, and batch lookup operations
+	GraphStorage
+
 	// Lifecycle operations
 	Lifecycle
 
@@ -321,4 +324,40 @@ type GarbageCollection interface {
 	// CleanupOldRunContext removes run-scoped context entries older than the specified duration.
 	// Returns the number of entries deleted.
 	CleanupOldRunContext(ctx context.Context, olderThan time.Duration) (int64, error)
+}
+
+// GraphStorage defines batch traversal, lexical entity anchor, FTS relationship
+// search (Variant B), and prefix-indexed candidate lookup operations for
+// zero-LLM-at-query-time Graph RAG.
+type GraphStorage interface {
+	// SearchRelationshipsFTS performs full-text search across relational triples
+	// (source entity name, relation type, target entity name, and description).
+	SearchRelationshipsFTS(ctx context.Context, namespace, query string, topK int) ([]*types.RelationshipResult, error)
+
+	// FindLexicalEntityMatches matches exact/alias n-grams from query against
+	// entity_aliases in a single indexed lookup.
+	FindLexicalEntityMatches(ctx context.Context, namespace, query string, limit int) ([]*types.Entity, error)
+
+	// GetRelationshipsBatch fetches up to maxPerEntity incident relationships
+	// per entity in entityIDs, prioritized by confidence and mention count.
+	GetRelationshipsBatch(ctx context.Context, namespace string, entityIDs []string, maxPerEntity int) ([]*types.EntityRelationship, error)
+
+	// GetMentionsByEntityIDs fetches up to limitPerEntity mention links
+	// (EntityID, SourceID) for each entity in entityIDs filtered by sourceType.
+	GetMentionsByEntityIDs(ctx context.Context, namespace string, entityIDs []string, sourceType string, limitPerEntity int) ([]*types.EntityMention, error)
+
+	// GetMentionsBySourceIDs fetches mention links (EntityID, SourceID) for the
+	// given source IDs filtered by sourceType.
+	GetMentionsBySourceIDs(ctx context.Context, namespace, sourceType string, sourceIDs []string) ([]*types.EntityMention, error)
+
+	// GetChunksByIDs hydrates chunk results with document metadata for a batch
+	// of chunk IDs, honoring optional collection and metadata filters.
+	GetChunksByIDs(ctx context.Context, namespace string, chunkIDs []string, collectionID *string, filters map[string]string) ([]*types.ChunkResult, error)
+
+	// GetEntitiesByIDs hydrates entity records for a batch of entity IDs.
+	GetEntitiesByIDs(ctx context.Context, namespace string, entityIDs []string) ([]*types.Entity, error)
+
+	// FindEntityCandidatesByPrefix returns entities whose canonical name or
+	// alias starts with prefix (case-insensitive), avoiding full-namespace scans.
+	FindEntityCandidatesByPrefix(ctx context.Context, namespace, prefix string, limit int) ([]*types.Entity, error)
 }

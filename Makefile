@@ -9,54 +9,55 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.dat
 
 # Go variables
 GOBIN ?= $(shell go env GOPATH)/bin
+GO_TAGS := sqlite_fts5
 
 all: lint test build
 
 ## Build
 
 build: ## Build the binary
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/cortex
+	CGO_ENABLED=1 go build -tags $(GO_TAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/cortex
 
 install: ## Install the binary to GOBIN
-	CGO_ENABLED=1 go install -ldflags "$(LDFLAGS)" ./cmd/cortex
+	CGO_ENABLED=1 go install -tags $(GO_TAGS) -ldflags "$(LDFLAGS)" ./cmd/cortex
 
 ## Run
 
 run: ## Run the MCP server (stdio)
-	go run ./cmd/cortex serve
+	go run -tags $(GO_TAGS) ./cmd/cortex serve
 
 run-sse: ## Run the MCP server (SSE transport)
-	go run ./cmd/cortex serve --transport sse --port 9810
+	go run -tags $(GO_TAGS) ./cmd/cortex serve --transport sse --port 9810
 
 tui: ## Run the terminal UI
-	go run ./cmd/cortex tui
+	go run -tags $(GO_TAGS) ./cmd/cortex tui
 
 ## Test
 
 test: ## Run tests
-	go test -v -race ./...
+	go test -tags $(GO_TAGS) -v -race ./...
 
 test-cover: ## Run tests with coverage
-	go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+	go test -tags $(GO_TAGS) -v -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
 
 test-short: ## Run tests (short mode)
-	go test -v -short ./...
+	go test -tags $(GO_TAGS) -v -short ./...
 
 test-integration: ## Run integration tests (requires Docker for pgvector conformance)
-	go test -v -race -run Conformance ./internal/storage/...
+	go test -tags $(GO_TAGS) -v -race -run Conformance ./internal/storage/...
 
 ## Lint & Format
 
 lint: ## Run golangci-lint
-	golangci-lint run --timeout=5m
+	golangci-lint run --build-tags=$(GO_TAGS) --timeout=5m
 
 fmt: ## Format code
 	gofmt -s -w .
 	goimports -w -local github.com/petal-labs/cortex .
 
 vet: ## Run go vet
-	go vet ./...
+	go vet -tags $(GO_TAGS) ./...
 
 sec: ## Run gosec security scanner
 	gosec -exclude-dir=.git -exclude-dir=vendor ./...

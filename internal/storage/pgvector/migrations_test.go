@@ -101,8 +101,8 @@ func TestBuildMigrations_InitialSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(migrations) != 2 {
-		t.Fatalf("expected 2 migrations, got %d", len(migrations))
+	if len(migrations) != 3 {
+		t.Fatalf("expected 3 migrations, got %d", len(migrations))
 	}
 	m := migrations[0]
 	if m.Version != 1 {
@@ -137,6 +137,17 @@ func TestBuildMigrations_InitialSchema(t *testing.T) {
 	}
 	if len(backoff.Up) == 0 {
 		t.Error("expected non-empty Up statements for backoff migration")
+	}
+
+	graphMig := migrations[2]
+	if graphMig.Version != 3 {
+		t.Errorf("expected version 3, got %d", graphMig.Version)
+	}
+	if graphMig.Name != "graph_rag_variant_b" {
+		t.Errorf("expected name graph_rag_variant_b, got %q", graphMig.Name)
+	}
+	if len(graphMig.Up) == 0 {
+		t.Error("expected non-empty Up statements for graph_rag_variant_b migration")
 	}
 }
 

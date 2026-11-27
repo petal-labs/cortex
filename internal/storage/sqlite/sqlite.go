@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -23,11 +24,15 @@ func init() {
 	sqlite_vec.Auto()
 }
 
+// defaultReadPoolSize bounds the concurrent WAL reader pool.
+const defaultReadPoolSize = 4
+
 // Backend implements storage.Backend using SQLite with the vec0 extension.
 type Backend struct {
-	db     *sql.DB
+	db     *sql.DB // Single-writer handle (writes, transactions, migrations, backups)
+	readDB *sql.DB // Concurrent read-only WAL pool (nil or == db for :memory:)
 	dbPath string
-	mu     sync.RWMutex // Protects concurrent access
+	mu     sync.RWMutex // Protects lifecycle state
 }
 
 // Verify Backend implements storage.Backend at compile time.
@@ -60,17 +65,16 @@ func New(cfg *config.Config) (*Backend, error) {
 
 	dbPath := filepath.Join(dataDir, "cortex.db")
 
-	// Open database with appropriate pragmas for performance
-	// Using WAL mode for better concurrent read/write performance
-	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=10000&_foreign_keys=ON", dbPath)
+	// Open writer handle with WAL mode and immediate write transactions so
+	// concurrent WAL readers never block on write lock upgrades.
+	writeDSN := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=10000&_foreign_keys=ON&_txlock=immediate", dbPath)
 
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite3", writeDSN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool settings
-	// SQLite is single-writer, so we limit max connections
+	// SQLite allows one writer at a time; pin the writer pool to 1 connection.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
@@ -96,6 +100,24 @@ func New(cfg *config.Config) (*Backend, error) {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	// Open a separate read-only WAL connection pool after migrations have
+	// created the database file and enabled WAL mode.
+	readDSN := fmt.Sprintf("file:%s?mode=ro&_query_only=1&_busy_timeout=5000&_cache_size=10000", dbPath)
+	readDB, err := sql.Open("sqlite3", readDSN)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to open read-only database pool: %w", err)
+	}
+	readDB.SetMaxOpenConns(defaultReadPoolSize)
+	readDB.SetMaxIdleConns(defaultReadPoolSize)
+
+	if err := readDB.PingContext(context.Background()); err != nil {
+		readDB.Close()
+		db.Close()
+		return nil, fmt.Errorf("failed to connect to read-only database pool: %w", err)
+	}
+	backend.readDB = readDB
+
 	return backend, nil
 }
 
@@ -104,30 +126,58 @@ func New(cfg *config.Config) (*Backend, error) {
 func NewWithDB(db *sql.DB) *Backend {
 	return &Backend{
 		db:     db,
+		readDB: db,
 		dbPath: ":memory:",
 	}
 }
 
-// DB returns the underlying database connection.
+// DB returns the underlying writer database connection.
 // Use with caution - prefer using Backend methods.
 func (b *Backend) DB() *sql.DB {
 	return b.db
 }
 
-// Close closes the database connection.
+// ReadDB returns the read-only WAL connection pool (or the primary DB for
+// in-memory backends).
+func (b *Backend) ReadDB() *sql.DB {
+	return b.reader()
+}
+
+func (b *Backend) reader() *sql.DB {
+	if b.readDB != nil {
+		return b.readDB
+	}
+	return b.db
+}
+
+// Close closes the database connections.
 func (b *Backend) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.db != nil {
-		return b.db.Close()
+	var errs []error
+	if b.readDB != nil && b.readDB != b.db {
+		if err := b.readDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	if b.db != nil {
+		if err := b.db.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
-// Health checks the database connection.
+// Health checks the database connections.
 func (b *Backend) Health(ctx context.Context) error {
-	return b.db.PingContext(ctx)
+	if err := b.db.PingContext(ctx); err != nil {
+		return err
+	}
+	if b.readDB != nil && b.readDB != b.db {
+		return b.readDB.PingContext(ctx)
+	}
+	return nil
 }
 
 // Migrate runs database migrations.
@@ -137,7 +187,7 @@ func (b *Backend) Migrate(ctx context.Context) error {
 
 // FTS5Available checks if FTS5 full-text search is available.
 func (b *Backend) FTS5Available(ctx context.Context) bool {
-	return IsFTS5Available(ctx, b.db)
+	return IsFTS5Available(ctx, b.reader())
 }
 
 // Transaction helper for executing operations in a transaction.

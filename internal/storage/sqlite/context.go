@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/petal-labs/cortex/internal/storage"
@@ -25,12 +26,14 @@ func (b *Backend) GetContext(ctx context.Context, namespace, key string, runID *
 	var updatedBy sql.NullString
 	var ttlExpiresAt sql.NullInt64
 	var updatedAtUnix int64
+	nowUnix := time.Now().UTC().Unix()
 
 	err := b.db.QueryRowContext(ctx, `
 		SELECT namespace, run_id, key, value, version, updated_at, updated_by, ttl_expires_at
 		FROM context_entries
 		WHERE namespace = ? AND run_id = ? AND key = ?
-	`, namespace, runIDStr, key).Scan(
+		  AND (ttl_expires_at IS NULL OR ttl_expires_at > ?)
+	`, namespace, runIDStr, key, nowUnix).Scan(
 		&entry.Namespace, &runIDStr, &entry.Key, &valueJSON,
 		&entry.Version, &updatedAtUnix, &updatedBy, &ttlExpiresAt,
 	)
@@ -91,22 +94,28 @@ func (b *Backend) SetContext(ctx context.Context, entry *types.ContextEntry, exp
 	}
 
 	return b.withTx(ctx, func(tx *sql.Tx) error {
-		// Check current version if expectedVersion is provided
+		// Check current version and expiry status
 		var currentVersion int64
-		var exists bool
+		var existingTTL sql.NullInt64
+		var rowExists bool
+		nowUnix := time.Now().UTC().Unix()
 
 		err := tx.QueryRowContext(ctx, `
-			SELECT version FROM context_entries
+			SELECT version, ttl_expires_at FROM context_entries
 			WHERE namespace = ? AND run_id = ? AND key = ?
-		`, entry.Namespace, runIDStr, entry.Key).Scan(&currentVersion)
+		`, entry.Namespace, runIDStr, entry.Key).Scan(&currentVersion, &existingTTL)
 
 		if err == sql.ErrNoRows {
-			exists = false
+			rowExists = false
 			currentVersion = 0
 		} else if err != nil {
 			return fmt.Errorf("failed to check current version: %w", err)
 		} else {
-			exists = true
+			rowExists = true
+			// Treat an expired existing row as non-existent for version checks.
+			if existingTTL.Valid && existingTTL.Int64 <= nowUnix {
+				currentVersion = 0
+			}
 		}
 
 		// Optimistic concurrency check
@@ -120,8 +129,8 @@ func (b *Backend) SetContext(ctx context.Context, entry *types.ContextEntry, exp
 		newVersion := currentVersion + 1
 		entry.Version = newVersion
 
-		if exists {
-			// Update existing entry
+		if rowExists {
+			// Update existing physical row (including replacing an expired row)
 			_, err = tx.ExecContext(ctx, `
 				UPDATE context_entries
 				SET value = ?, version = ?, updated_at = ?, updated_by = ?, ttl_expires_at = ?
@@ -168,12 +177,14 @@ func (b *Backend) ListContextKeys(ctx context.Context, namespace string, prefix 
 		runIDStr = *runID
 	}
 
+	nowUnix := time.Now().UTC().Unix()
 	var args []any
 	query := `
 		SELECT key FROM context_entries
 		WHERE namespace = ? AND run_id = ?
+		  AND (ttl_expires_at IS NULL OR ttl_expires_at > ?)
 	`
-	args = append(args, namespace, runIDStr)
+	args = append(args, namespace, runIDStr, nowUnix)
 
 	// Add prefix filter if provided
 	if prefix != nil && *prefix != "" {
@@ -351,7 +362,7 @@ func (b *Backend) CleanupExpiredContext(ctx context.Context) (int64, error) {
 
 	result, err := b.db.ExecContext(ctx, `
 		DELETE FROM context_entries
-		WHERE ttl_expires_at IS NOT NULL AND ttl_expires_at < ?
+		WHERE ttl_expires_at IS NOT NULL AND ttl_expires_at <= ?
 	`, now)
 
 	if err != nil {
@@ -368,6 +379,10 @@ func (b *Backend) CleanupExpiredContext(ctx context.Context) (int64, error) {
 
 // CleanupRunContext removes all context entries for a specific run.
 func (b *Backend) CleanupRunContext(ctx context.Context, namespace, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("run_id cannot be empty: %w", storage.ErrInvalidInput)
+	}
+
 	_, err := b.db.ExecContext(ctx, `
 		DELETE FROM context_entries
 		WHERE namespace = ? AND run_id = ?

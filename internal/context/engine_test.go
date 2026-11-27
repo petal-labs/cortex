@@ -3,6 +3,8 @@ package context
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -701,4 +703,142 @@ func TestConcatUnique(t *testing.T) {
 	if len(result) != 4 {
 		t.Errorf("expected 4 unique elements, got %d", len(result))
 	}
+}
+
+func TestMergeOptimisticLockingAndTTL(t *testing.T) {
+	t.Run("missing key with non-zero ExpectedVersion returns ErrVersionConflict", func(t *testing.T) {
+		engine, backend := setupTestEngine(t)
+		defer backend.Close()
+
+		v5 := int64(5)
+		_, err := engine.Merge(context.Background(), "ns", "missing-key", map[string]any{"a": 1}, &MergeOpts{
+			ExpectedVersion: &v5,
+		})
+		if !errors.Is(err, ErrVersionConflict) {
+			t.Fatalf("expected ErrVersionConflict for non-existent key with ExpectedVersion=5, got %v", err)
+		}
+	})
+
+	t.Run("preserves active TTL on merge unless explicitly overridden", func(t *testing.T) {
+		engine, backend := setupTestEngine(t)
+		defer backend.Close()
+
+		ctx := context.Background()
+		if _, err := engine.Set(ctx, "ns", "ttl-merge", map[string]any{"a": 1}, &SetOpts{
+			TTL: 1 * time.Hour,
+		}); err != nil {
+			t.Fatalf("Set with TTL: %v", err)
+		}
+		before, err := backend.GetContext(ctx, "ns", "ttl-merge", nil)
+		if err != nil || before.TTLExpiresAt == nil {
+			t.Fatalf("expected TTLExpiresAt to be set before merge, got entry=%+v err=%v", before, err)
+		}
+
+		if _, err := engine.Merge(ctx, "ns", "ttl-merge", map[string]any{"b": 2}, &MergeOpts{
+			Strategy: types.MergeStrategyDeepMerge,
+		}); err != nil {
+			t.Fatalf("Merge failed: %v", err)
+		}
+
+		after, err := backend.GetContext(ctx, "ns", "ttl-merge", nil)
+		if err != nil {
+			t.Fatalf("GetContext after merge: %v", err)
+		}
+		if after.TTLExpiresAt == nil {
+			t.Fatal("expected TTLExpiresAt to be preserved after merge, got nil")
+		}
+		if !after.TTLExpiresAt.Equal(*before.TTLExpiresAt) {
+			t.Errorf("expected TTLExpiresAt %v to be preserved, got %v", *before.TTLExpiresAt, *after.TTLExpiresAt)
+		}
+	})
+
+	t.Run("does not mutate caller MergeOpts", func(t *testing.T) {
+		engine, backend := setupTestEngine(t)
+		defer backend.Close()
+
+		opts := &MergeOpts{}
+		if _, err := engine.Merge(context.Background(), "ns", "immut", map[string]any{"a": 1}, opts); err != nil {
+			t.Fatalf("Merge failed: %v", err)
+		}
+		if opts.Strategy != "" {
+			t.Errorf("caller MergeOpts.Strategy was mutated to %q", opts.Strategy)
+		}
+		if opts.ArrayStrategy != "" {
+			t.Errorf("caller MergeOpts.ArrayStrategy was mutated to %q", opts.ArrayStrategy)
+		}
+	})
+
+	t.Run("concurrent Merge calls cannot silently clobber each other", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Storage.DataDir = t.TempDir()
+		backend, err := sqlite.New(cfg)
+		if err != nil {
+			t.Fatalf("sqlite.New: %v", err)
+		}
+		defer backend.Close()
+		if err := backend.Migrate(context.Background()); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+
+		engine, err := NewEngine(backend, &cfg.Context)
+		if err != nil {
+			t.Fatalf("NewEngine: %v", err)
+		}
+
+		ctx := context.Background()
+		if _, err := engine.Set(ctx, "ns", "counter", 0, nil); err != nil {
+			t.Fatalf("initial Set: %v", err)
+		}
+
+		const goroutines = 12
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make(chan error, goroutines)
+
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, err := engine.Merge(ctx, "ns", "counter", 1, &MergeOpts{
+					Strategy: types.MergeStrategySum,
+				})
+				errs <- err
+			}()
+		}
+
+		close(start)
+		wg.Wait()
+		close(errs)
+
+		successes, conflicts := 0, 0
+		for err := range errs {
+			switch {
+			case err == nil:
+				successes++
+			case errors.Is(err, ErrVersionConflict):
+				conflicts++
+			default:
+				t.Errorf("unexpected error during concurrent Merge: %v", err)
+			}
+		}
+
+		if successes == 0 {
+			t.Fatal("expected at least one concurrent Merge to succeed")
+		}
+		// Crucial invariant: final counter value MUST equal exact number of successful merges
+		// (zero lost updates!).
+		got, err := engine.Get(ctx, "ns", "counter", nil)
+		if err != nil {
+			t.Fatalf("Get final counter: %v", err)
+		}
+		finalVal, ok := toFloat64(got.Value)
+		if !ok {
+			t.Fatalf("expected numeric final value, got %T (%v)", got.Value, got.Value)
+		}
+		if int(finalVal) != successes {
+			t.Errorf("lost update detected! final counter=%v, successful merges=%d (conflicts=%d)",
+				finalVal, successes, conflicts)
+		}
+	})
 }

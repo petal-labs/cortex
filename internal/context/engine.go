@@ -111,50 +111,69 @@ func (e *Engine) Set(ctx context.Context, namespace, key string, value any, opts
 		return nil, ErrEmptyKey
 	}
 
-	if opts == nil {
-		opts = &SetOpts{}
+	var (
+		runID           *string
+		expectedVersion *int64
+		updatedBy       string
+		ttlExpires      *time.Time
+	)
+	if opts != nil {
+		runID = opts.RunID
+		expectedVersion = opts.ExpectedVersion
+		updatedBy = opts.UpdatedBy
+		if opts.TTL > 0 {
+			exp := time.Now().UTC().Add(opts.TTL)
+			ttlExpires = &exp
+		}
 	}
 
+	return e.setWithExpiry(ctx, namespace, key, value, runID, expectedVersion, updatedBy, ttlExpires)
+}
+
+func (e *Engine) setWithExpiry(
+	ctx context.Context,
+	namespace, key string,
+	value any,
+	runID *string,
+	expectedVersion *int64,
+	updatedBy string,
+	ttlExpires *time.Time,
+) (*SetResult, error) {
 	// Get current version for the result
 	var previousVersion int64
-	existing, err := e.storage.GetContext(ctx, namespace, key, opts.RunID)
-	if err == nil {
+	if existing, err := e.storage.GetContext(ctx, namespace, key, runID); err == nil {
 		previousVersion = existing.Version
-	}
-
-	// Calculate TTL expiration
-	var ttlExpires *time.Time
-	if opts.TTL > 0 {
-		exp := time.Now().Add(opts.TTL)
-		ttlExpires = &exp
 	}
 
 	entry := &types.ContextEntry{
 		Namespace:    namespace,
-		RunID:        opts.RunID,
+		RunID:        runID,
 		Key:          key,
 		Value:        value,
 		UpdatedAt:    time.Now().UTC(),
-		UpdatedBy:    opts.UpdatedBy,
+		UpdatedBy:    updatedBy,
 		TTLExpiresAt: ttlExpires,
 	}
 
-	if err := e.storage.SetContext(ctx, entry, opts.ExpectedVersion); err != nil {
+	if err := e.storage.SetContext(ctx, entry, expectedVersion); err != nil {
 		if errors.Is(err, storage.ErrVersionConflict) {
 			return nil, ErrVersionConflict
 		}
 		return nil, fmt.Errorf("failed to set context: %w", err)
 	}
 
-	// Get the new version
-	updated, err := e.storage.GetContext(ctx, namespace, key, opts.RunID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get updated context: %w", err)
+	newVersion := entry.Version
+	if newVersion == 0 {
+		updated, err := e.storage.GetContext(ctx, namespace, key, runID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get updated context: %w", err)
+		}
+		newVersion = updated.Version
 	}
 
 	return &SetResult{
 		Key:             key,
-		Version:         updated.Version,
+		Version:         newVersion,
 		PreviousVersion: previousVersion,
 	}, nil
 }
@@ -165,6 +184,7 @@ type MergeOpts struct {
 	ExpectedVersion *int64              // For optimistic concurrency
 	Strategy        types.MergeStrategy // Merge strategy (default: deep_merge)
 	ArrayStrategy   types.ArrayStrategy // How to handle arrays in deep_merge
+	TTL             time.Duration       // Optional TTL override; 0 preserves existing TTL
 	UpdatedBy       string              // Agent/task identifier
 }
 
@@ -175,54 +195,84 @@ type MergeResult struct {
 	MergedValue any    `json:"merged_value"`
 }
 
-// Merge combines a new value with an existing context entry.
+// Merge combines a new value with an existing context entry using optimistic
+// compare-and-swap so concurrent updates cannot silently clobber each other.
 func (e *Engine) Merge(ctx context.Context, namespace, key string, value any, opts *MergeOpts) (*MergeResult, error) {
 	if key == "" {
 		return nil, ErrEmptyKey
 	}
 
-	if opts == nil {
-		opts = &MergeOpts{}
+	var (
+		runID           *string
+		expectedVersion *int64
+		strategy        types.MergeStrategy
+		arrayStrategy   types.ArrayStrategy
+		ttlOverride     time.Duration
+		updatedBy       string
+	)
+	if opts != nil {
+		runID = opts.RunID
+		expectedVersion = opts.ExpectedVersion
+		strategy = opts.Strategy
+		arrayStrategy = opts.ArrayStrategy
+		ttlOverride = opts.TTL
+		updatedBy = opts.UpdatedBy
 	}
 
-	if opts.Strategy == "" {
-		opts.Strategy = types.MergeStrategyDeepMerge
+	if strategy == "" {
+		strategy = types.MergeStrategyDeepMerge
 	}
-	if opts.ArrayStrategy == "" {
-		opts.ArrayStrategy = types.ArrayStrategyConcat
+	if arrayStrategy == "" {
+		arrayStrategy = types.ArrayStrategyConcat
 	}
 
 	// Get existing value
-	existing, err := e.storage.GetContext(ctx, namespace, key, opts.RunID)
+	existing, err := e.storage.GetContext(ctx, namespace, key, runID)
 
-	var mergedValue any
+	var (
+		mergedValue any
+		casVersion  int64
+		ttlExpires  *time.Time
+	)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			// No existing value, just set the new value
+			if expectedVersion != nil && *expectedVersion != 0 {
+				return nil, ErrVersionConflict
+			}
+			// No existing value; enforce CAS version 0 on create.
+			casVersion = 0
 			mergedValue = value
 		} else {
 			return nil, fmt.Errorf("failed to get existing context: %w", err)
 		}
 	} else {
 		// Check version if expected
-		if opts.ExpectedVersion != nil && existing.Version != *opts.ExpectedVersion {
+		if expectedVersion != nil && existing.Version != *expectedVersion {
 			return nil, ErrVersionConflict
 		}
 
 		// Merge values based on strategy
-		mergedValue, err = e.mergeValues(existing.Value, value, opts.Strategy, opts.ArrayStrategy)
+		mergedValue, err = e.mergeValues(existing.Value, value, strategy, arrayStrategy)
 		if err != nil {
 			return nil, err
 		}
+
+		// Enforce atomic CAS against the observed version in storage.
+		casVersion = existing.Version
+
+		// Preserve existing TTL unless an explicit TTL override is provided.
+		if existing.TTLExpiresAt != nil {
+			exp := *existing.TTLExpiresAt
+			ttlExpires = &exp
+		}
 	}
 
-	// Set the merged value
-	setOpts := &SetOpts{
-		RunID:     opts.RunID,
-		UpdatedBy: opts.UpdatedBy,
+	if ttlOverride > 0 {
+		exp := time.Now().UTC().Add(ttlOverride)
+		ttlExpires = &exp
 	}
 
-	result, err := e.Set(ctx, namespace, key, mergedValue, setOpts)
+	result, err := e.setWithExpiry(ctx, namespace, key, mergedValue, runID, &casVersion, updatedBy, ttlExpires)
 	if err != nil {
 		return nil, err
 	}

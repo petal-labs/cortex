@@ -153,6 +153,77 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 	return messages, nextCursor, nil
 }
 
+// GetUnsummarizedMessages retrieves unsummarized messages from a thread in chronological order.
+// If limit > 0, returns up to the most recent limit unsummarized messages with cursor pagination.
+// If limit <= 0, returns all unsummarized messages.
+func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error) {
+	var args []any
+	query := `
+		SELECT id, namespace, thread_id, role, content, metadata, summarized, created_at
+		FROM messages
+		WHERE namespace = $1 AND thread_id = $2 AND summarized = FALSE
+	`
+	args = append(args, namespace, threadID)
+	argNum := 3
+
+	if cursor != "" {
+		query += fmt.Sprintf(" AND created_at < $%d", argNum)
+		args = append(args, cursor)
+		argNum++
+	}
+
+	if limit > 0 {
+		query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", argNum)
+		args = append(args, limit+1)
+	} else {
+		query += " ORDER BY created_at ASC"
+	}
+
+	rows, err := b.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to query unsummarized messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []*types.Message
+	for rows.Next() {
+		msg := &types.Message{}
+		var metadataJSON []byte
+
+		if err := rows.Scan(&msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content, &metadataJSON, &msg.Summarized, &msg.CreatedAt); err != nil {
+			return nil, "", fmt.Errorf("failed to scan message: %w", err)
+		}
+
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &msg.Metadata); err != nil {
+				return nil, "", fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+
+		messages = append(messages, msg)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("failed to iterate unsummarized messages: %w", err)
+	}
+
+	var nextCursor string
+	if limit > 0 {
+		if len(messages) > limit {
+			messages = messages[:limit]
+			if len(messages) > 0 {
+				nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339Nano)
+			}
+		}
+		// Reverse to get chronological order (oldest first)
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
+	}
+
+	return messages, nextCursor, nil
+}
+
 // ListThreads returns all threads in a namespace.
 func (b *Backend) ListThreads(ctx context.Context, namespace string, cursor string, limit int) ([]*types.Thread, string, error) {
 	if limit <= 0 {
@@ -329,6 +400,25 @@ func (b *Backend) MarkMessagesSummarized(ctx context.Context, namespace, threadI
 
 	if err != nil {
 		return fmt.Errorf("failed to mark messages summarized: %w", err)
+	}
+
+	return nil
+}
+
+// MarkMessagesSummarizedByIDs marks the specified message IDs as having been included in a summary.
+func (b *Backend) MarkMessagesSummarizedByIDs(ctx context.Context, namespace, threadID string, messageIDs []string) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+
+	_, err := b.pool.Exec(ctx, `
+		UPDATE messages
+		SET summarized = TRUE
+		WHERE namespace = $1 AND thread_id = $2 AND id = ANY($3)
+	`, namespace, threadID, messageIDs)
+
+	if err != nil {
+		return fmt.Errorf("failed to mark messages summarized by IDs: %w", err)
 	}
 
 	return nil

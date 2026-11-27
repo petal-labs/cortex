@@ -289,6 +289,209 @@ func testEntity(ctx context.Context, t *testing.T, b storage.Backend, dims int) 
 		}
 	})
 
+	t.Run("MergeEntitiesSelfMergeRejected", func(t *testing.T) {
+		ent := &types.Entity{
+			ID:        "merge-self",
+			Namespace: ns,
+			Name:      "Self Entity",
+			Type:      types.EntityTypePerson,
+			Aliases:   []string{"Selfy"},
+		}
+		if err := b.UpsertEntity(ctx, ent); err != nil {
+			t.Fatalf("UpsertEntity: %v", err)
+		}
+
+		if err := b.MergeEntities(ctx, ns, "merge-self", "merge-self"); err == nil {
+			t.Fatal("expected error when merging entity into itself, got nil")
+		}
+
+		// Entity and alias must remain intact.
+		got, err := b.GetEntityByID(ctx, ns, "merge-self")
+		if err != nil {
+			t.Fatalf("entity was lost after rejected self-merge: %v", err)
+		}
+		if got.Name != "Self Entity" {
+			t.Errorf("expected name 'Self Entity', got %q", got.Name)
+		}
+		if _, err := b.ResolveAlias(ctx, ns, "selfy"); err != nil {
+			t.Errorf("alias was lost after rejected self-merge: %v", err)
+		}
+	})
+
+	t.Run("MergeEntitiesOverlappingRelationshipsAndAliasSync", func(t *testing.T) {
+		// Create source, target, shared outgoing target, and shared incoming source.
+		entities := []*types.Entity{
+			{ID: "ov-src", Namespace: ns, Name: "Alpha One", Type: types.EntityTypePerson, Aliases: []string{"Alpha", "SharedAlias"}},
+			{ID: "ov-tgt", Namespace: ns, Name: "Alpha Prime", Type: types.EntityTypePerson, Aliases: []string{"sharedalias", "Prime"}},
+			{ID: "ov-org", Namespace: ns, Name: "Shared Org", Type: types.EntityTypeOrganization},
+			{ID: "ov-mgr", Namespace: ns, Name: "Shared Manager", Type: types.EntityTypePerson},
+		}
+		for _, e := range entities {
+			if err := b.UpsertEntity(ctx, e); err != nil {
+				t.Fatalf("UpsertEntity %s: %v", e.ID, err)
+			}
+		}
+
+		// Overlapping outgoing relationships: both src and tgt work_at ov-org.
+		if err := b.UpsertRelationship(ctx, &types.EntityRelationship{
+			Namespace: ns, SourceEntityID: "ov-src", TargetEntityID: "ov-org",
+			RelationType: "works_at", Confidence: 0.9, MentionCount: 2,
+		}); err != nil {
+			t.Fatalf("UpsertRelationship src->org: %v", err)
+		}
+		if err := b.UpsertRelationship(ctx, &types.EntityRelationship{
+			Namespace: ns, SourceEntityID: "ov-tgt", TargetEntityID: "ov-org",
+			RelationType: "works_at", Confidence: 0.7, MentionCount: 3,
+		}); err != nil {
+			t.Fatalf("UpsertRelationship tgt->org: %v", err)
+		}
+
+		// Overlapping incoming relationships: ov-mgr manages both src and tgt.
+		if err := b.UpsertRelationship(ctx, &types.EntityRelationship{
+			Namespace: ns, SourceEntityID: "ov-mgr", TargetEntityID: "ov-src",
+			RelationType: "manages", Confidence: 0.85, MentionCount: 1,
+		}); err != nil {
+			t.Fatalf("UpsertRelationship mgr->src: %v", err)
+		}
+		if err := b.UpsertRelationship(ctx, &types.EntityRelationship{
+			Namespace: ns, SourceEntityID: "ov-mgr", TargetEntityID: "ov-tgt",
+			RelationType: "manages", Confidence: 0.6, MentionCount: 2,
+		}); err != nil {
+			t.Fatalf("UpsertRelationship mgr->tgt: %v", err)
+		}
+
+		// Self-referencing relationship in ANOTHER namespace must remain untouched.
+		const otherNS = "conf-entity-other-selfref"
+		if err := b.UpsertEntity(ctx, &types.Entity{ID: "other-self", Namespace: otherNS, Name: "Other Self", Type: types.EntityTypeConcept}); err != nil {
+			t.Fatalf("UpsertEntity other-self: %v", err)
+		}
+		if err := b.UpsertRelationship(ctx, &types.EntityRelationship{
+			Namespace: otherNS, SourceEntityID: "other-self", TargetEntityID: "other-self",
+			RelationType: "references", Confidence: 1.0, MentionCount: 1,
+		}); err != nil {
+			t.Fatalf("UpsertRelationship other self-ref: %v", err)
+		}
+
+		if err := b.MergeEntities(ctx, ns, "ov-src", "ov-tgt"); err != nil {
+			t.Fatalf("MergeEntities with overlapping relationships failed: %v", err)
+		}
+
+		// Verify consolidated outgoing relationship.
+		outgoing, err := b.GetRelationships(ctx, ns, "ov-tgt", storage.RelationshipOpts{Direction: types.RelationshipDirectionOutgoing})
+		if err != nil {
+			t.Fatalf("GetRelationships outgoing: %v", err)
+		}
+		if len(outgoing) != 1 {
+			t.Fatalf("expected 1 consolidated outgoing relationship, got %d", len(outgoing))
+		}
+		if outgoing[0].MentionCount != 5 {
+			t.Errorf("expected aggregated outgoing mention_count 5, got %d", outgoing[0].MentionCount)
+		}
+
+		// Verify consolidated incoming relationship.
+		incoming, err := b.GetRelationships(ctx, ns, "ov-tgt", storage.RelationshipOpts{Direction: types.RelationshipDirectionIncoming})
+		if err != nil {
+			t.Fatalf("GetRelationships incoming: %v", err)
+		}
+		if len(incoming) != 1 {
+			t.Fatalf("expected 1 consolidated incoming relationship, got %d", len(incoming))
+		}
+		if incoming[0].MentionCount != 3 {
+			t.Errorf("expected aggregated incoming mention_count 3, got %d", incoming[0].MentionCount)
+		}
+
+		// Verify other namespace's self-referencing relationship was untouched.
+		otherRels, err := b.GetRelationships(ctx, otherNS, "other-self", storage.RelationshipOpts{Direction: types.RelationshipDirectionBoth})
+		if err != nil {
+			t.Fatalf("GetRelationships otherNS: %v", err)
+		}
+		if len(otherRels) != 1 {
+			t.Errorf("expected other namespace self-referencing relationship to remain intact, got %d", len(otherRels))
+		}
+
+		// Verify aliases are synchronized into entities.aliases and survive subsequent UpsertEntity.
+		tgt, err := b.GetEntityByID(ctx, ns, "ov-tgt")
+		if err != nil {
+			t.Fatalf("GetEntityByID ov-tgt: %v", err)
+		}
+		tgt.Summary = "Updated after merge"
+		if err := b.UpsertEntity(ctx, tgt); err != nil {
+			t.Fatalf("UpsertEntity after merge: %v", err)
+		}
+
+		for _, alias := range []string{"alpha", "alpha one", "sharedalias", "prime"} {
+			resolved, err := b.ResolveAlias(ctx, ns, alias)
+			if err != nil {
+				t.Errorf("expected alias %q to still resolve after UpsertEntity, got err: %v", alias, err)
+			} else if resolved.ID != "ov-tgt" {
+				t.Errorf("expected alias %q to resolve to ov-tgt, got %s", alias, resolved.ID)
+			}
+		}
+	})
+
+	t.Run("CrossNamespaceUpsertAndMentionIsolation", func(t *testing.T) {
+		const nsA = "conf-entity-iso-a"
+		const nsB = "conf-entity-iso-b"
+
+		orig := &types.Entity{
+			ID:        "shared-id-iso",
+			Namespace: nsA,
+			Name:      "Tenant A Secret",
+			Type:      types.EntityTypeOrganization,
+			Aliases:   []string{"TenantA"},
+			Summary:   "Original summary",
+		}
+		if err := b.UpsertEntity(ctx, orig); err != nil {
+			t.Fatalf("UpsertEntity nsA: %v", err)
+		}
+
+		// UpsertEntity in nsB reusing nsA's entity ID must fail and leave nsA untouched.
+		attacker := &types.Entity{
+			ID:        "shared-id-iso",
+			Namespace: nsB,
+			Name:      "Hijacked Name",
+			Type:      types.EntityTypeOrganization,
+			Aliases:   []string{"HijackAlias"},
+			Summary:   "Overwritten",
+		}
+		if err := b.UpsertEntity(ctx, attacker); err == nil {
+			t.Fatal("expected error on cross-namespace UpsertEntity with colliding ID, got nil")
+		}
+
+		gotA, err := b.GetEntityByID(ctx, nsA, "shared-id-iso")
+		if err != nil {
+			t.Fatalf("GetEntityByID nsA: %v", err)
+		}
+		if gotA.Name != "Tenant A Secret" || gotA.Summary != "Original summary" {
+			t.Errorf("nsA entity was mutated by cross-namespace UpsertEntity: %+v", gotA)
+		}
+		if _, err := b.ResolveAlias(ctx, nsA, "tenanta"); err != nil {
+			t.Errorf("nsA alias lost after rejected cross-namespace UpsertEntity: %v", err)
+		}
+		if _, err := b.ResolveAlias(ctx, nsB, "hijackalias"); err == nil {
+			t.Error("cross-namespace UpsertEntity should not have created aliases in nsB")
+		}
+
+		// InsertMention in nsB referencing nsA's entity ID must fail and not increment nsA's mention_count.
+		err = b.InsertMention(ctx, &types.EntityMention{
+			EntityID:   "shared-id-iso",
+			Namespace:  nsB,
+			SourceType: "conversation",
+			SourceID:   "bad-msg",
+		})
+		if err == nil {
+			t.Fatal("expected error on cross-namespace InsertMention, got nil")
+		}
+
+		gotAAfter, err := b.GetEntityByID(ctx, nsA, "shared-id-iso")
+		if err != nil {
+			t.Fatalf("GetEntityByID nsA after mention attempt: %v", err)
+		}
+		if gotAAfter.MentionCount != gotA.MentionCount {
+			t.Errorf("nsA mention_count changed from %d to %d after rejected cross-namespace InsertMention", gotA.MentionCount, gotAAfter.MentionCount)
+		}
+	})
+
 	t.Run("StoreEmbeddingAndSearch", func(t *testing.T) {
 		entities := []*types.Entity{
 			{ID: "ent-search-1", Namespace: ns, Name: "OpenAI", Type: types.EntityTypeOrganization, Summary: "AI research lab"},

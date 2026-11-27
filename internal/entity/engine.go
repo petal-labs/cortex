@@ -647,18 +647,22 @@ func (e *Engine) Merge(ctx context.Context, namespace, sourceID, targetID string
 		return nil, fmt.Errorf("failed to get target entity: %w", err)
 	}
 
-	// Merge source aliases into target
+	// Merge source aliases into target (case-insensitive dedup)
 	aliasSet := make(map[string]bool)
+	aliasSet[strings.ToLower(target.Name)] = true
 	for _, a := range target.Aliases {
 		aliasSet[strings.ToLower(a)] = true
 	}
 	for _, a := range source.Aliases {
-		if !aliasSet[strings.ToLower(a)] {
+		lower := strings.ToLower(a)
+		if !aliasSet[lower] {
+			aliasSet[lower] = true
 			target.Aliases = append(target.Aliases, a)
 		}
 	}
 	// Add source name as alias
 	if !aliasSet[strings.ToLower(source.Name)] && !strings.EqualFold(source.Name, target.Name) {
+		aliasSet[strings.ToLower(source.Name)] = true
 		target.Aliases = append(target.Aliases, source.Name)
 	}
 
@@ -687,20 +691,41 @@ func (e *Engine) Merge(ctx context.Context, namespace, sourceID, targetID string
 		target.LastSeenAt = source.LastSeenAt
 	}
 
+	// Count relationships on source that will be merged/repointed onto target
+	// (excluding direct source<->target relationships which are dropped as self-loops).
+	sourceRels, err := e.storage.GetRelationships(ctx, namespace, sourceID, storage.RelationshipOpts{
+		Direction: types.RelationshipDirectionBoth,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source relationships: %w", err)
+	}
+	mergedRelationships := 0
+	for _, rel := range sourceRels {
+		if rel.SourceEntityID == targetID || rel.TargetEntityID == targetID {
+			continue
+		}
+		mergedRelationships++
+	}
+
 	// Update target entity
 	if err := e.storage.UpsertEntity(ctx, target); err != nil {
 		return nil, fmt.Errorf("failed to update target entity: %w", err)
 	}
 
-	// Perform the storage-level merge (moves mentions, relationships, etc.)
+	// Perform the storage-level merge (moves mentions, relationships, aliases, etc.)
 	if err := e.storage.MergeEntities(ctx, namespace, sourceID, targetID); err != nil {
 		return nil, fmt.Errorf("failed to merge entities: %w", err)
+	}
+
+	// Re-read kept entity so callers observe the persisted mention count and aliases.
+	if refreshed, err := e.storage.GetEntityByID(ctx, namespace, targetID); err == nil {
+		target = refreshed
 	}
 
 	return &MergeResult{
 		KeptEntity:          target,
 		MergedMentions:      int(source.MentionCount),
-		MergedRelationships: 0, // TODO: count relationships
+		MergedRelationships: mergedRelationships,
 	}, nil
 }
 

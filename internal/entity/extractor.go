@@ -77,9 +77,23 @@ var entityExtractionSchema = &core.JSONSchemaDefinition{
 							"description": "Concise one-sentence summary of the entity"
 						},
 						"attributes": {
-							"type": ["object", "null"],
-							"additionalProperties": {"type": "string"},
-							"description": "Key facts about the entity"
+							"type": ["array", "null"],
+							"items": {
+								"type": "object",
+								"properties": {
+									"key": {
+										"type": "string",
+										"description": "Attribute name"
+									},
+									"value": {
+										"type": "string",
+										"description": "Attribute value"
+									}
+								},
+								"required": ["key", "value"],
+								"additionalProperties": false
+							},
+							"description": "Key facts about the entity as key-value pairs"
 						},
 						"confidence": {
 							"type": "number",
@@ -277,13 +291,81 @@ func parseExtractionPayload(content string) ([]ExtractedEntity, []ExtractedRelat
 	return nil, nil, fmt.Errorf("no valid JSON entities found in response")
 }
 
+// flexAttributes unmarshals entity attributes from either the strict
+// structured-output array form ([{"key": "k", "value": "v"}]), null, or
+// the legacy object map form ({"k": "v"}).
+type flexAttributes map[string]string
+
+func (f *flexAttributes) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*f = nil
+		return nil
+	}
+
+	if trimmed[0] == '[' {
+		var pairs []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal(data, &pairs); err != nil {
+			return err
+		}
+		attrs := make(map[string]string, len(pairs))
+		for _, p := range pairs {
+			k := strings.TrimSpace(p.Key)
+			if k == "" {
+				continue
+			}
+			attrs[k] = p.Value
+		}
+		*f = attrs
+		return nil
+	}
+
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	*f = m
+	return nil
+}
+
+type wireExtractedEntity struct {
+	Name       string           `json:"name"`
+	Type       types.EntityType `json:"type"`
+	Aliases    []string         `json:"aliases,omitempty"`
+	Summary    string           `json:"summary,omitempty"`
+	Attributes flexAttributes   `json:"attributes,omitempty"`
+	Confidence float64          `json:"confidence"`
+}
+
+func (w wireExtractedEntity) toExtractedEntity() ExtractedEntity {
+	return ExtractedEntity{
+		Name:       w.Name,
+		Type:       w.Type,
+		Aliases:    w.Aliases,
+		Summary:    w.Summary,
+		Attributes: map[string]string(w.Attributes),
+		Confidence: w.Confidence,
+	}
+}
+
+func convertWireEntities(wire []wireExtractedEntity) []ExtractedEntity {
+	out := make([]ExtractedEntity, len(wire))
+	for i, w := range wire {
+		out[i] = w.toExtractedEntity()
+	}
+	return out
+}
+
 func tryParsePayload(s string) ([]ExtractedEntity, []ExtractedRelationship, error) {
 	var wrapper struct {
-		Entities      []ExtractedEntity       `json:"entities"`
+		Entities      []wireExtractedEntity   `json:"entities"`
 		Relationships []ExtractedRelationship `json:"relationships"`
 	}
 	if err := json.Unmarshal([]byte(s), &wrapper); err == nil && wrapper.Entities != nil {
-		return wrapper.Entities, wrapper.Relationships, nil
+		return convertWireEntities(wrapper.Entities), wrapper.Relationships, nil
 	}
 
 	entities, err := tryParseEntities(s)
@@ -389,20 +471,20 @@ func scanBalanced(content string, start int) int {
 // or a single entity object ({"name": ...}).
 func tryParseEntities(s string) ([]ExtractedEntity, error) {
 	var wrapper struct {
-		Entities []ExtractedEntity `json:"entities"`
+		Entities []wireExtractedEntity `json:"entities"`
 	}
 	if err := json.Unmarshal([]byte(s), &wrapper); err == nil && wrapper.Entities != nil {
-		return wrapper.Entities, nil
+		return convertWireEntities(wrapper.Entities), nil
 	}
 
-	var entities []ExtractedEntity
+	var entities []wireExtractedEntity
 	if err := json.Unmarshal([]byte(s), &entities); err == nil {
-		return entities, nil
+		return convertWireEntities(entities), nil
 	}
 
-	var single ExtractedEntity
+	var single wireExtractedEntity
 	if err := json.Unmarshal([]byte(s), &single); err == nil && single.Name != "" {
-		return []ExtractedEntity{single}, nil
+		return []ExtractedEntity{single.toExtractedEntity()}, nil
 	}
 
 	return nil, fmt.Errorf("not parseable as entities")

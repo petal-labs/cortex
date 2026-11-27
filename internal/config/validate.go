@@ -237,6 +237,14 @@ func (c *Config) Validate() error {
 			"retention.gc_interval must be > 0 (got %s)", c.Retention.GCInterval))
 	}
 
+	// Namespace
+	for i, ns := range c.Namespace.AllowedNamespaces {
+		if strings.TrimSpace(ns) == "" {
+			problems = append(problems, fmt.Sprintf(
+				"namespace.allowed_namespaces[%d] must not be empty or whitespace", i))
+		}
+	}
+
 	// Server
 	switch c.Server.LogLevel {
 	case "debug", "info", "warn", "error":

@@ -49,11 +49,11 @@ func (b *Backend) UpsertEntity(ctx context.Context, entity *types.Entity) error 
 	}
 
 	return b.withTx(ctx, func(tx *sql.Tx) error {
-		// Check if entity exists
-		var existingID string
+		// Check if entity exists and verify namespace ownership
+		var existingNamespace string
 		err := tx.QueryRowContext(ctx,
-			"SELECT id FROM entities WHERE id = ?", entity.ID,
-		).Scan(&existingID)
+			"SELECT namespace FROM entities WHERE id = ?", entity.ID,
+		).Scan(&existingNamespace)
 
 		if err == sql.ErrNoRows {
 			// Insert new entity
@@ -69,24 +69,28 @@ func (b *Backend) UpsertEntity(ctx context.Context, entity *types.Entity) error 
 		} else if err != nil {
 			return fmt.Errorf("failed to check entity existence: %w", err)
 		} else {
+			if existingNamespace != entity.Namespace {
+				return fmt.Errorf("entity %q belongs to another namespace: %w", entity.ID, storage.ErrInvalidInput)
+			}
+
 			// Update existing entity
 			_, err = tx.ExecContext(ctx, `
 				UPDATE entities
 				SET name = ?, type = ?, aliases = ?, summary = ?, attributes = ?, metadata = ?,
 				    mention_count = ?, last_seen_at = ?
-				WHERE id = ?
+				WHERE id = ? AND namespace = ?
 			`, entity.Name, string(entity.Type), aliasesJSON, entity.Summary,
 				attributesJSON, metadataJSON, entity.MentionCount,
-				entity.LastSeenAt.Unix(), entity.ID)
+				entity.LastSeenAt.Unix(), entity.ID, entity.Namespace)
 			if err != nil {
 				return fmt.Errorf("failed to update entity: %w", err)
 			}
 		}
 
 		// Update aliases in lookup table
-		// First, delete existing aliases for this entity
+		// First, delete existing aliases for this entity in this namespace
 		_, err = tx.ExecContext(ctx,
-			"DELETE FROM entity_aliases WHERE entity_id = ?", entity.ID,
+			"DELETE FROM entity_aliases WHERE entity_id = ? AND namespace = ?", entity.ID, entity.Namespace,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to clear aliases: %w", err)
@@ -426,90 +430,275 @@ func (b *Backend) DeleteEntity(ctx context.Context, namespace, entityID string) 
 
 // MergeEntities combines two entities, moving all data from source to target.
 func (b *Backend) MergeEntities(ctx context.Context, namespace, sourceID, targetID string) error {
+	if sourceID == "" || targetID == "" {
+		return fmt.Errorf("source and target entity IDs are required: %w", storage.ErrInvalidInput)
+	}
+	if sourceID == targetID {
+		return fmt.Errorf("cannot merge entity %q into itself: %w", sourceID, storage.ErrInvalidInput)
+	}
+
 	return b.withTx(ctx, func(tx *sql.Tx) error {
-		// Verify both entities exist
-		var sourceExists, targetExists bool
+		// Verify both entities exist in this namespace and load their names/aliases
+		var sourceName, targetName string
+		var sourceAliasesJSON, targetAliasesJSON sql.NullString
+
 		err := tx.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM entities WHERE id = ? AND namespace = ?)",
+			"SELECT name, aliases FROM entities WHERE id = ? AND namespace = ?",
 			sourceID, namespace,
-		).Scan(&sourceExists)
-		if err != nil {
-			return fmt.Errorf("failed to check source entity: %w", err)
-		}
-		if !sourceExists {
+		).Scan(&sourceName, &sourceAliasesJSON)
+		if err == sql.ErrNoRows {
 			return storage.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("failed to load source entity: %w", err)
 		}
 
 		err = tx.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM entities WHERE id = ? AND namespace = ?)",
+			"SELECT name, aliases FROM entities WHERE id = ? AND namespace = ?",
 			targetID, namespace,
-		).Scan(&targetExists)
-		if err != nil {
-			return fmt.Errorf("failed to check target entity: %w", err)
-		}
-		if !targetExists {
+		).Scan(&targetName, &targetAliasesJSON)
+		if err == sql.ErrNoRows {
 			return storage.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("failed to load target entity: %w", err)
 		}
 
 		// Move mentions from source to target
 		_, err = tx.ExecContext(ctx,
-			"UPDATE entity_mentions SET entity_id = ? WHERE entity_id = ?",
-			targetID, sourceID,
+			"UPDATE entity_mentions SET entity_id = ? WHERE namespace = ? AND entity_id = ?",
+			targetID, namespace, sourceID,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to move mentions: %w", err)
 		}
 
-		// Move outgoing relationships (update source_entity_id)
+		// Remove direct relationships between source and target (would become self-references)
 		_, err = tx.ExecContext(ctx, `
-			UPDATE entity_relationships
-			SET source_entity_id = ?
-			WHERE source_entity_id = ? AND target_entity_id != ?
-		`, targetID, sourceID, targetID)
+			DELETE FROM entity_relationships
+			WHERE namespace = ?
+			  AND ((source_entity_id = ? AND target_entity_id = ?)
+			    OR (source_entity_id = ? AND target_entity_id = ?))
+		`, namespace, sourceID, targetID, targetID, sourceID)
 		if err != nil {
-			return fmt.Errorf("failed to move outgoing relationships: %w", err)
+			return fmt.Errorf("failed to delete direct relationships between merged entities: %w", err)
 		}
 
-		// Move incoming relationships (update target_entity_id)
-		_, err = tx.ExecContext(ctx, `
-			UPDATE entity_relationships
-			SET target_entity_id = ?
-			WHERE target_entity_id = ? AND source_entity_id != ?
-		`, targetID, sourceID, targetID)
-		if err != nil {
-			return fmt.Errorf("failed to move incoming relationships: %w", err)
+		type relRow struct {
+			id           string
+			otherID      string
+			relationType string
+			confidence   float64
+			mentionCount int64
+			firstSeenAt  int64
+			lastSeenAt   int64
 		}
 
-		// Delete self-referencing relationships that might have been created
+		// Reconcile outgoing relationships (source_entity_id = sourceID)
+		outRows, err := tx.QueryContext(ctx, `
+			SELECT id, target_entity_id, relation_type, confidence, mention_count, first_seen_at, last_seen_at
+			FROM entity_relationships
+			WHERE namespace = ? AND source_entity_id = ?
+		`, namespace, sourceID)
+		if err != nil {
+			return fmt.Errorf("failed to query outgoing relationships: %w", err)
+		}
+		var outgoing []relRow
+		for outRows.Next() {
+			var r relRow
+			if err := outRows.Scan(&r.id, &r.otherID, &r.relationType, &r.confidence, &r.mentionCount, &r.firstSeenAt, &r.lastSeenAt); err != nil {
+				outRows.Close()
+				return fmt.Errorf("failed to scan outgoing relationship: %w", err)
+			}
+			outgoing = append(outgoing, r)
+		}
+		if err := outRows.Err(); err != nil {
+			outRows.Close()
+			return fmt.Errorf("failed to iterate outgoing relationships: %w", err)
+		}
+		outRows.Close()
+
+		for _, r := range outgoing {
+			var existingID string
+			err := tx.QueryRowContext(ctx, `
+				SELECT id FROM entity_relationships
+				WHERE namespace = ? AND source_entity_id = ? AND target_entity_id = ? AND relation_type = ?
+			`, namespace, targetID, r.otherID, r.relationType).Scan(&existingID)
+			if err == sql.ErrNoRows {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE entity_relationships
+					SET source_entity_id = ?
+					WHERE id = ? AND namespace = ?
+				`, targetID, r.id, namespace); err != nil {
+					return fmt.Errorf("failed to repoint outgoing relationship: %w", err)
+				}
+			} else if err != nil {
+				return fmt.Errorf("failed to check overlapping outgoing relationship: %w", err)
+			} else {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE entity_relationships
+					SET mention_count = mention_count + ?,
+					    confidence = MAX(confidence, ?),
+					    first_seen_at = MIN(first_seen_at, ?),
+					    last_seen_at = MAX(last_seen_at, ?)
+					WHERE id = ? AND namespace = ?
+				`, r.mentionCount, r.confidence, r.firstSeenAt, r.lastSeenAt, existingID, namespace); err != nil {
+					return fmt.Errorf("failed to merge overlapping outgoing relationship: %w", err)
+				}
+				if _, err := tx.ExecContext(ctx,
+					"DELETE FROM entity_relationships WHERE id = ? AND namespace = ?",
+					r.id, namespace,
+				); err != nil {
+					return fmt.Errorf("failed to delete merged outgoing relationship: %w", err)
+				}
+			}
+		}
+
+		// Reconcile incoming relationships (target_entity_id = sourceID)
+		inRows, err := tx.QueryContext(ctx, `
+			SELECT id, source_entity_id, relation_type, confidence, mention_count, first_seen_at, last_seen_at
+			FROM entity_relationships
+			WHERE namespace = ? AND target_entity_id = ?
+		`, namespace, sourceID)
+		if err != nil {
+			return fmt.Errorf("failed to query incoming relationships: %w", err)
+		}
+		var incoming []relRow
+		for inRows.Next() {
+			var r relRow
+			if err := inRows.Scan(&r.id, &r.otherID, &r.relationType, &r.confidence, &r.mentionCount, &r.firstSeenAt, &r.lastSeenAt); err != nil {
+				inRows.Close()
+				return fmt.Errorf("failed to scan incoming relationship: %w", err)
+			}
+			incoming = append(incoming, r)
+		}
+		if err := inRows.Err(); err != nil {
+			inRows.Close()
+			return fmt.Errorf("failed to iterate incoming relationships: %w", err)
+		}
+		inRows.Close()
+
+		for _, r := range incoming {
+			var existingID string
+			err := tx.QueryRowContext(ctx, `
+				SELECT id FROM entity_relationships
+				WHERE namespace = ? AND source_entity_id = ? AND target_entity_id = ? AND relation_type = ?
+			`, namespace, r.otherID, targetID, r.relationType).Scan(&existingID)
+			if err == sql.ErrNoRows {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE entity_relationships
+					SET target_entity_id = ?
+					WHERE id = ? AND namespace = ?
+				`, targetID, r.id, namespace); err != nil {
+					return fmt.Errorf("failed to repoint incoming relationship: %w", err)
+				}
+			} else if err != nil {
+				return fmt.Errorf("failed to check overlapping incoming relationship: %w", err)
+			} else {
+				if _, err := tx.ExecContext(ctx, `
+					UPDATE entity_relationships
+					SET mention_count = mention_count + ?,
+					    confidence = MAX(confidence, ?),
+					    first_seen_at = MIN(first_seen_at, ?),
+					    last_seen_at = MAX(last_seen_at, ?)
+					WHERE id = ? AND namespace = ?
+				`, r.mentionCount, r.confidence, r.firstSeenAt, r.lastSeenAt, existingID, namespace); err != nil {
+					return fmt.Errorf("failed to merge overlapping incoming relationship: %w", err)
+				}
+				if _, err := tx.ExecContext(ctx,
+					"DELETE FROM entity_relationships WHERE id = ? AND namespace = ?",
+					r.id, namespace,
+				); err != nil {
+					return fmt.Errorf("failed to delete merged incoming relationship: %w", err)
+				}
+			}
+		}
+
+		// Delete self-referencing relationships scoped to this namespace
 		_, err = tx.ExecContext(ctx,
-			"DELETE FROM entity_relationships WHERE source_entity_id = target_entity_id",
+			"DELETE FROM entity_relationships WHERE namespace = ? AND source_entity_id = target_entity_id",
+			namespace,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to clean self-references: %w", err)
 		}
 
-		// Update target's mention count
-		_, err = tx.ExecContext(ctx, `
-			UPDATE entities
-			SET mention_count = (SELECT COUNT(*) FROM entity_mentions WHERE entity_id = ?)
-			WHERE id = ?
-		`, targetID, targetID)
-		if err != nil {
-			return fmt.Errorf("failed to update mention count: %w", err)
-		}
-
-		// Move aliases from source to target
+		// Move aliases from source to target in entity_aliases
 		_, err = tx.ExecContext(ctx,
-			"UPDATE OR IGNORE entity_aliases SET entity_id = ? WHERE entity_id = ?",
-			targetID, sourceID,
+			"UPDATE OR IGNORE entity_aliases SET entity_id = ? WHERE namespace = ? AND entity_id = ?",
+			targetID, namespace, sourceID,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to move aliases: %w", err)
 		}
 
+		// Ensure source canonical name is registered as an alias for target
+		if sourceName != "" && !strings.EqualFold(sourceName, targetName) {
+			_, err = tx.ExecContext(ctx, `
+				INSERT OR IGNORE INTO entity_aliases (namespace, alias, entity_id)
+				VALUES (?, ?, ?)
+			`, namespace, strings.ToLower(sourceName), targetID)
+			if err != nil {
+				return fmt.Errorf("failed to register source name as alias: %w", err)
+			}
+		}
+
+		// Synchronize entities.aliases on target with deduplicated (case-insensitive) merged aliases
+		var targetAliases, sourceAliases []string
+		if targetAliasesJSON.Valid && targetAliasesJSON.String != "" && targetAliasesJSON.String != "null" {
+			if err := json.Unmarshal([]byte(targetAliasesJSON.String), &targetAliases); err != nil {
+				return fmt.Errorf("failed to unmarshal target aliases: %w", err)
+			}
+		}
+		if sourceAliasesJSON.Valid && sourceAliasesJSON.String != "" && sourceAliasesJSON.String != "null" {
+			if err := json.Unmarshal([]byte(sourceAliasesJSON.String), &sourceAliases); err != nil {
+				return fmt.Errorf("failed to unmarshal source aliases: %w", err)
+			}
+		}
+
+		// Also collect any aliases present in entity_aliases for target
+		aliasRows, err := tx.QueryContext(ctx,
+			"SELECT alias FROM entity_aliases WHERE namespace = ? AND entity_id = ? ORDER BY alias",
+			namespace, targetID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to query target aliases: %w", err)
+		}
+		var lookupAliases []string
+		for aliasRows.Next() {
+			var a string
+			if err := aliasRows.Scan(&a); err != nil {
+				aliasRows.Close()
+				return fmt.Errorf("failed to scan alias: %w", err)
+			}
+			lookupAliases = append(lookupAliases, a)
+		}
+		if err := aliasRows.Err(); err != nil {
+			aliasRows.Close()
+			return fmt.Errorf("failed to iterate aliases: %w", err)
+		}
+		aliasRows.Close()
+
+		mergedAliases := mergeEntityAliases(targetName, targetAliases, sourceName, sourceAliases, lookupAliases)
+		mergedAliasesJSON, err := json.Marshal(mergedAliases)
+		if err != nil {
+			return fmt.Errorf("failed to marshal merged aliases: %w", err)
+		}
+
+		// Update target's mention count and synchronized aliases
+		_, err = tx.ExecContext(ctx, `
+			UPDATE entities
+			SET mention_count = (SELECT COUNT(*) FROM entity_mentions WHERE namespace = ? AND entity_id = ?),
+			    aliases = ?
+			WHERE id = ? AND namespace = ?
+		`, namespace, targetID, mergedAliasesJSON, targetID, namespace)
+		if err != nil {
+			return fmt.Errorf("failed to update target entity: %w", err)
+		}
+
 		// Delete source entity (cascades to remaining aliases)
 		_, err = tx.ExecContext(ctx,
-			"DELETE FROM entities WHERE id = ?", sourceID,
+			"DELETE FROM entities WHERE id = ? AND namespace = ?", sourceID, namespace,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to delete source entity: %w", err)
@@ -517,6 +706,43 @@ func (b *Backend) MergeEntities(ctx context.Context, namespace, sourceID, target
 
 		return nil
 	})
+}
+
+// mergeEntityAliases merges aliases from target, source, source's canonical name,
+// and lookup table entries with case-insensitive deduplication, excluding target's own name.
+func mergeEntityAliases(targetName string, targetAliases []string, sourceName string, sourceAliases, lookupAliases []string) []string {
+	seen := make(map[string]bool)
+	if targetName != "" {
+		seen[strings.ToLower(strings.TrimSpace(targetName))] = true
+	}
+
+	merged := make([]string, 0, len(targetAliases)+len(sourceAliases)+1)
+	add := func(alias string) {
+		a := strings.TrimSpace(alias)
+		if a == "" {
+			return
+		}
+		lower := strings.ToLower(a)
+		if seen[lower] {
+			return
+		}
+		seen[lower] = true
+		merged = append(merged, a)
+	}
+
+	for _, a := range targetAliases {
+		add(a)
+	}
+	for _, a := range sourceAliases {
+		add(a)
+	}
+	if sourceName != "" {
+		add(sourceName)
+	}
+	for _, a := range lookupAliases {
+		add(a)
+	}
+	return merged
 }
 
 // InsertMention records a mention of an entity in source content.
@@ -529,24 +755,32 @@ func (b *Backend) InsertMention(ctx context.Context, mention *types.EntityMentio
 	}
 
 	return b.withTx(ctx, func(tx *sql.Tx) error {
+		// Verify entity exists in the mention's namespace and update mention count + last_seen_at
+		result, err := tx.ExecContext(ctx, `
+			UPDATE entities
+			SET mention_count = mention_count + 1, last_seen_at = ?
+			WHERE id = ? AND namespace = ?
+		`, mention.CreatedAt.Unix(), mention.EntityID, mention.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to update entity mention count: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		if rowsAffected == 0 {
+			return storage.ErrNotFound
+		}
+
 		// Insert mention
-		_, err := tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO entity_mentions (id, entity_id, namespace, source_type, source_id, context, snippet, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`, mention.ID, mention.EntityID, mention.Namespace, mention.SourceType,
 			mention.SourceID, mention.Context, mention.Snippet, mention.CreatedAt.Unix())
 		if err != nil {
 			return fmt.Errorf("failed to insert mention: %w", err)
-		}
-
-		// Update entity mention count and last_seen_at
-		_, err = tx.ExecContext(ctx, `
-			UPDATE entities
-			SET mention_count = mention_count + 1, last_seen_at = ?
-			WHERE id = ?
-		`, mention.CreatedAt.Unix(), mention.EntityID)
-		if err != nil {
-			return fmt.Errorf("failed to update entity mention count: %w", err)
 		}
 
 		return nil

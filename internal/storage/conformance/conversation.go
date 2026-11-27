@@ -200,4 +200,57 @@ func testConversation(ctx context.Context, t *testing.T, b storage.Backend, dims
 			}
 		}
 	})
+
+	t.Run("MarkMessagesSummarizedByIDsAndGetUnsummarized", func(t *testing.T) {
+		threadID := "thread-unsummarized-ids"
+		sameSec := time.Now().UTC().Truncate(time.Second)
+
+		var ids []string
+		for i := 0; i < 6; i++ {
+			msg := &types.Message{
+				ID:        "same-sec-msg-" + string(rune('a'+i)),
+				Namespace: ns,
+				ThreadID:  threadID,
+				Role:      "user",
+				Content:   "message " + string(rune('a'+i)),
+				CreatedAt: sameSec,
+			}
+			if err := b.AppendMessage(ctx, msg); err != nil {
+				t.Fatalf("AppendMessage %d: %v", i, err)
+			}
+			ids = append(ids, msg.ID)
+		}
+
+		// Mark first 4 IDs summarized; last 2 share the exact same second and must stay unsummarized.
+		if err := b.MarkMessagesSummarizedByIDs(ctx, ns, threadID, ids[:4]); err != nil {
+			t.Fatalf("MarkMessagesSummarizedByIDs: %v", err)
+		}
+
+		unsummarized, _, err := b.GetUnsummarizedMessages(ctx, ns, threadID, 0, "")
+		if err != nil {
+			t.Fatalf("GetUnsummarizedMessages: %v", err)
+		}
+		if len(unsummarized) != 2 {
+			t.Fatalf("expected 2 unsummarized messages, got %d", len(unsummarized))
+		}
+		for _, msg := range unsummarized {
+			if msg.Summarized {
+				t.Errorf("expected message %s to be unsummarized", msg.ID)
+			}
+		}
+
+		// Limit parameter should cap results while returning only unsummarized messages.
+		limited, _, err := b.GetUnsummarizedMessages(ctx, ns, threadID, 1, "")
+		if err != nil {
+			t.Fatalf("GetUnsummarizedMessages(limit=1): %v", err)
+		}
+		if len(limited) != 1 {
+			t.Fatalf("expected 1 unsummarized message with limit=1, got %d", len(limited))
+		}
+
+		// Empty slice should be a no-op.
+		if err := b.MarkMessagesSummarizedByIDs(ctx, ns, threadID, nil); err != nil {
+			t.Fatalf("MarkMessagesSummarizedByIDs(nil): %v", err)
+		}
+	})
 }

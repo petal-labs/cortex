@@ -384,11 +384,12 @@ func computeMetrics(results []*types.ChunkResult, q evalQuestion) (ansHit, chain
 		}
 	}
 
-	// Ideal DCG: answer chunk (rel=2) at rank 1, remaining support chunks (rel=1) next.
-	idcg := (math.Pow(2, 2) - 1) / math.Log2(2)
+	// Ideal DCG: answer chunk (rel=2 -> gain 2^2-1 = 3) at rank 1,
+	// remaining support chunks (rel=1 -> gain 2^1-1 = 1) next.
+	idcg := 3.0 / math.Log2(2)
 	extra := min(len(q.supportChunks)-1, 4)
 	for i := 1; i <= extra; i++ {
-		idcg += (math.Pow(2, 1) - 1) / math.Log2(float64(i+2))
+		idcg += 1.0 / math.Log2(float64(i+2))
 	}
 	if idcg > 0 {
 		ndcg = dcg / idcg

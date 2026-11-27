@@ -37,7 +37,6 @@ cortex/
 │   ├── config/          # Configuration loading
 │   ├── context/         # Workflow context engine
 │   ├── conversation/    # Conversation memory engine
-│   ├── dashboard/       # Web dashboard
 │   ├── embedding/       # Embedding providers
 │   ├── entity/          # Entity memory engine
 │   ├── gc/              # Garbage collection

@@ -3,10 +3,13 @@ package pgvector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
@@ -25,6 +28,7 @@ func (b *Backend) GetContext(ctx context.Context, namespace, key string, runID *
 		SELECT namespace, run_id, key, value, version, updated_at, updated_by, expires_at
 		FROM context_entries
 		WHERE namespace = $1 AND key = $2 AND COALESCE(run_id, '') = COALESCE($3, '')
+		  AND (expires_at IS NULL OR expires_at > NOW())
 	`, namespace, key, runID).Scan(
 		&entry.Namespace, &runIDValue, &entry.Key, &valueJSON,
 		&entry.Version, &entry.UpdatedAt, &updatedBy, &expiresAt,
@@ -72,22 +76,30 @@ func (b *Backend) SetContext(ctx context.Context, entry *types.ContextEntry, exp
 	}
 	defer tx.Rollback(ctx)
 
-	// Check current version if expectedVersion is provided
+	// Lock the existing row (if any) with FOR UPDATE so concurrent writers
+	// serialize their optimistic concurrency check and history version writes.
 	var currentVersion int64
-	var exists bool
+	var expired bool
+	var rowExists bool
 
 	err = tx.QueryRow(ctx, `
-		SELECT version FROM context_entries
+		SELECT version, (expires_at IS NOT NULL AND expires_at <= NOW())
+		FROM context_entries
 		WHERE namespace = $1 AND key = $2 AND COALESCE(run_id, '') = COALESCE($3, '')
-	`, entry.Namespace, entry.Key, entry.RunID).Scan(&currentVersion)
+		FOR UPDATE
+	`, entry.Namespace, entry.Key, entry.RunID).Scan(&currentVersion, &expired)
 
 	if err == pgx.ErrNoRows {
-		exists = false
+		rowExists = false
 		currentVersion = 0
 	} else if err != nil {
 		return fmt.Errorf("failed to check current version: %w", err)
 	} else {
-		exists = true
+		rowExists = true
+		// Treat an expired existing row as non-existent for version checks.
+		if expired {
+			currentVersion = 0
+		}
 	}
 
 	// Optimistic concurrency check
@@ -101,8 +113,8 @@ func (b *Backend) SetContext(ctx context.Context, entry *types.ContextEntry, exp
 	newVersion := currentVersion + 1
 	entry.Version = newVersion
 
-	if exists {
-		// Update existing entry
+	if rowExists {
+		// Update existing physical row (including replacing an expired row)
 		_, err = tx.Exec(ctx, `
 			UPDATE context_entries
 			SET value = $1, version = $2, updated_at = $3, updated_by = $4, expires_at = $5
@@ -119,6 +131,10 @@ func (b *Backend) SetContext(ctx context.Context, entry *types.ContextEntry, exp
 	}
 
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if expectedVersion != nil && errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return storage.ErrVersionConflict
+		}
 		return fmt.Errorf("failed to set context entry: %w", err)
 	}
 
@@ -146,6 +162,7 @@ func (b *Backend) ListContextKeys(ctx context.Context, namespace string, prefix 
 	query := `
 		SELECT key FROM context_entries
 		WHERE namespace = $1 AND COALESCE(run_id, '') = COALESCE($2, '')
+		  AND (expires_at IS NULL OR expires_at > NOW())
 	`
 	args = append(args, namespace, runID)
 	argNum := 3
@@ -318,7 +335,7 @@ func (b *Backend) GetContextHistory(ctx context.Context, namespace, key string, 
 func (b *Backend) CleanupExpiredContext(ctx context.Context) (int64, error) {
 	result, err := b.pool.Exec(ctx, `
 		DELETE FROM context_entries
-		WHERE expires_at IS NOT NULL AND expires_at < NOW()
+		WHERE expires_at IS NOT NULL AND expires_at <= NOW()
 	`)
 
 	if err != nil {
@@ -330,6 +347,10 @@ func (b *Backend) CleanupExpiredContext(ctx context.Context) (int64, error) {
 
 // CleanupRunContext removes all context entries for a specific run.
 func (b *Backend) CleanupRunContext(ctx context.Context, namespace, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("run_id cannot be empty: %w", storage.ErrInvalidInput)
+	}
+
 	_, err := b.pool.Exec(ctx, `
 		DELETE FROM context_entries
 		WHERE namespace = $1 AND run_id = $2

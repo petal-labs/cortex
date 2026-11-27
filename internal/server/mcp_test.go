@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -158,11 +160,167 @@ func TestNamespaceEnforcement(t *testing.T) {
 		})
 	}
 
-	// Server with no namespace restriction
+	// Server with no namespace restriction still rejects empty/whitespace namespaces
 	openSrv := testServer(t, "")
 	if err := openSrv.checkNamespace("any-namespace"); err != nil {
-		t.Errorf("open server should allow any namespace: %v", err)
+		t.Errorf("open server should allow any non-empty namespace: %v", err)
 	}
+	if err := openSrv.checkNamespace(""); err == nil {
+		t.Error("open server must reject empty namespace")
+	}
+	if err := openSrv.checkNamespace("   "); err == nil {
+		t.Error("open server must reject whitespace-only namespace")
+	}
+
+	// Whitespace namespace rejected via MCP tool call even when unrestricted
+	res, err := openSrv.handleConversationAppend(context.Background(), makeToolRequest("conversation_append", map[string]any{
+		"namespace": "   ",
+		"thread_id": "t1",
+		"role":      "user",
+		"content":   "hello",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !res.IsError {
+		t.Error("expected tool error for whitespace namespace")
+	}
+}
+
+func TestAllowedNamespacesListAndPrecedence(t *testing.T) {
+	newWithCfg := func(cfg *Config) *Server {
+		base := testServer(t, "")
+		return New(cfg, base.conversation, base.knowledge, base.context, base.entity)
+	}
+
+	t.Run("enforces AllowedNamespaces allowlist", func(t *testing.T) {
+		srv := newWithCfg(&Config{
+			Name:              "cortex-test",
+			Version:           "1.0.0",
+			AllowedNamespaces: []string{"ns-a", "ns-b"},
+		})
+
+		for _, ns := range []string{"ns-a", "ns-b"} {
+			res, err := srv.handleConversationAppend(context.Background(), makeToolRequest("conversation_append", map[string]any{
+				"namespace": ns,
+				"thread_id": "t1-" + ns,
+				"role":      "user",
+				"content":   "hello " + ns,
+			}))
+			if err != nil {
+				t.Fatalf("unexpected error for %s: %v", ns, err)
+			}
+			if res.IsError {
+				t.Errorf("expected %s to be allowed, got error: %s", ns, getTextContent(res))
+			}
+		}
+
+		res, err := srv.handleConversationAppend(context.Background(), makeToolRequest("conversation_append", map[string]any{
+			"namespace": "ns-c",
+			"thread_id": "t1-ns-c",
+			"role":      "user",
+			"content":   "blocked",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error for ns-c: %v", err)
+		}
+		if !res.IsError {
+			t.Error("expected ns-c to be rejected")
+		}
+	})
+
+	t.Run("single AllowedNamespace overrides AllowedNamespaces", func(t *testing.T) {
+		srv := newWithCfg(&Config{
+			Name:              "cortex-test",
+			Version:           "1.0.0",
+			AllowedNamespace:  "ns-a",
+			AllowedNamespaces: []string{"ns-b", "ns-c"},
+		})
+
+		if err := srv.checkNamespace("ns-a"); err != nil {
+			t.Errorf("expected ns-a to be allowed when AllowedNamespace is set, got %v", err)
+		}
+		if err := srv.checkNamespace("ns-b"); err == nil {
+			t.Error("expected ns-b to be rejected when single AllowedNamespace overrides AllowedNamespaces")
+		}
+	})
+}
+
+func TestSSESecurityMiddlewareAndTimeouts(t *testing.T) {
+	srv := testServer(t, "")
+
+	t.Run("default bind address and HTTP timeouts", func(t *testing.T) {
+		httpSrv := srv.NewSSEHTTPServer("")
+		if httpSrv.Addr != "127.0.0.1:9810" {
+			t.Errorf("expected default SSE addr 127.0.0.1:9810, got %q", httpSrv.Addr)
+		}
+		if httpSrv.ReadHeaderTimeout <= 0 {
+			t.Errorf("expected positive ReadHeaderTimeout, got %v", httpSrv.ReadHeaderTimeout)
+		}
+		if httpSrv.IdleTimeout <= 0 {
+			t.Errorf("expected positive IdleTimeout, got %v", httpSrv.IdleTimeout)
+		}
+	})
+
+	// Use a simple downstream stub that mimics mcp-go emitting Access-Control-Allow-Origin: *
+	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	handler := sseSecurityMiddleware("127.0.0.1:9810", downstream)
+
+	t.Run("rejects cross-origin request with 403", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9810/sse", nil)
+		req.Host = "127.0.0.1:9810"
+		req.Header.Set("Origin", "https://evil.example")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for cross-origin request, got %d", rec.Code)
+		}
+	})
+
+	t.Run("rejects invalid Host header (DNS rebinding) with 403", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://evil.example:9810/sse", nil)
+		req.Host = "evil.example:9810"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for invalid Host header, got %d", rec.Code)
+		}
+	})
+
+	t.Run("allows valid local request without Origin and strips wildcard CORS", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9810/sse", nil)
+		req.Host = "127.0.0.1:9810"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for valid local request, got %d", rec.Code)
+		}
+		if acao := rec.Header().Get("Access-Control-Allow-Origin"); acao != "" {
+			t.Errorf("expected Access-Control-Allow-Origin to be stripped, got %q", acao)
+		}
+	})
+
+	t.Run("allows valid localhost Origin and reflects origin instead of wildcard", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost:9810/message", nil)
+		req.Host = "localhost:9810"
+		req.Header.Set("Origin", "http://localhost:3000")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for valid localhost Origin, got %d", rec.Code)
+		}
+		if acao := rec.Header().Get("Access-Control-Allow-Origin"); acao != "http://localhost:3000" {
+			t.Errorf("expected Access-Control-Allow-Origin to reflect localhost origin, got %q", acao)
+		}
+	})
 }
 
 func TestConversationAppend(t *testing.T) {

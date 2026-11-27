@@ -3,7 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +29,7 @@ var (
 	mcpMode          bool
 	allowedNamespace string
 	transport        string
+	serveHost        string
 	port             int
 )
 
@@ -39,29 +43,45 @@ with AI agents and tools.
 
 Transport modes:
   stdio - Standard input/output (default, for process-based MCP clients)
-  sse   - Server-Sent Events over HTTP (for web-based MCP clients)
+  sse   - Server-Sent Events over HTTP (binds to 127.0.0.1 by default)
 
 Examples:
   # Start MCP server with stdio transport (default)
   cortex serve
 
-  # Start MCP server with SSE transport on port 9810
+  # Start MCP server with SSE transport on 127.0.0.1:9810
   cortex serve --transport sse --port 9810
 
-  # Start MCP server with namespace restriction
+  # Start MCP server with namespace restriction (overrides namespace.allowed_namespaces)
   cortex serve --namespace my-workflow
 
-  # SSE server with namespace restriction
-  cortex serve --transport sse --port 9810 --namespace my-workflow`,
+  # SSE server bound to a specific host with namespace restriction
+  cortex serve --transport sse --host 127.0.0.1 --port 9810 --namespace my-workflow`,
 	RunE: runServe,
 }
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().BoolVar(&mcpMode, "mcp", true, "Run in MCP mode (default)")
-	serveCmd.Flags().StringVar(&allowedNamespace, "namespace", "", "Restrict to a single namespace")
+	serveCmd.Flags().StringVar(&allowedNamespace, "namespace", "", "Restrict to a single namespace (overrides namespace.allowed_namespaces)")
 	serveCmd.Flags().StringVar(&transport, "transport", "stdio", "Transport mode: stdio or sse")
+	serveCmd.Flags().StringVar(&serveHost, "host", "127.0.0.1", "Host interface to bind for SSE transport (default 127.0.0.1)")
 	serveCmd.Flags().IntVar(&port, "port", 9810, "Port for SSE transport (default 9810)")
+}
+
+// resolveServeBindHost resolves the SSE bind host from CLI flag and config,
+// defaulting to 127.0.0.1.
+func resolveServeBindHost(flagHost string, flagChanged bool, cfgHost string) string {
+	if flagChanged && strings.TrimSpace(flagHost) != "" {
+		return strings.TrimSpace(flagHost)
+	}
+	if strings.TrimSpace(cfgHost) != "" {
+		return strings.TrimSpace(cfgHost)
+	}
+	if strings.TrimSpace(flagHost) != "" {
+		return strings.TrimSpace(flagHost)
+	}
+	return "127.0.0.1"
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -93,9 +113,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		queueStats := &queueStatsAdapter{store: store}
 		observability.InitMetrics(queueStats)
 
+		metricsHost := strings.TrimSpace(cfg.Server.MetricsHost)
+		if metricsHost == "" {
+			metricsHost = observability.DefaultMetricsHost
+		}
+		if !server.IsLoopbackHost(metricsHost) {
+			observability.Warn(ctx, "metrics server binding to non-loopback address without authentication",
+				observability.Field("metrics_host", metricsHost),
+				observability.Field("metrics_port", cfg.Server.MetricsPort),
+			)
+		}
+
 		// Start metrics server; /ready probes the storage backend so
 		// orchestrators can hold traffic until it is reachable.
-		metricsServer = observability.NewMetricsServer(cfg.Server.MetricsPort, store.Health)
+		metricsServer = observability.NewMetricsServerWithHost(metricsHost, cfg.Server.MetricsPort, store.Health)
 		metricsServer.Start()
 	}
 
@@ -179,9 +210,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Start MCP server
 	if mcpMode {
 		mcpCfg := &server.Config{
-			Name:             "cortex",
-			Version:          "1.0.0",
-			AllowedNamespace: allowedNamespace,
+			Name:              "cortex",
+			Version:           "1.0.0",
+			AllowedNamespace:  allowedNamespace,
+			AllowedNamespaces: cfg.Namespace.AllowedNamespaces,
 		}
 
 		srv := server.New(mcpCfg, convEngine, knowEngine, ctxEngine, entityEngine)
@@ -195,18 +227,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 			go func() { errCh <- srv.ServeStdio() }()
 
 		case "sse":
-			addr := fmt.Sprintf(":%d", port)
+			bindHost := resolveServeBindHost(serveHost, cmd.Flags().Changed("host"), cfg.Server.Host)
+			addr := net.JoinHostPort(bindHost, strconv.Itoa(port))
+			if !server.IsLoopbackHost(bindHost) {
+				observability.Warn(ctx, "MCP SSE server binding to non-loopback address without authentication; place behind a TLS/auth reverse proxy",
+					observability.Field("addr", addr),
+				)
+			}
 			observability.Info(ctx, "starting MCP server with SSE transport",
 				observability.Field("addr", addr),
-				observability.Field("sse_endpoint", fmt.Sprintf("/sse")),
-				observability.Field("message_endpoint", fmt.Sprintf("/message")),
+				observability.Field("sse_endpoint", "/sse"),
+				observability.Field("message_endpoint", "/message"),
 			)
 			if !cfg.Server.StructuredLogging {
 				fmt.Printf("Starting Cortex MCP server with SSE transport on %s\n", addr)
-				fmt.Printf("  SSE endpoint: http://localhost:%d/sse\n", port)
-				fmt.Printf("  Message endpoint: http://localhost:%d/message\n", port)
-				if cfg.Server.MetricsEnabled {
-					fmt.Printf("  Metrics endpoint: http://localhost:%d/metrics\n", cfg.Server.MetricsPort)
+				fmt.Printf("  SSE endpoint: http://%s/sse\n", addr)
+				fmt.Printf("  Message endpoint: http://%s/message\n", addr)
+				if cfg.Server.MetricsEnabled && metricsServer != nil {
+					fmt.Printf("  Metrics endpoint: http://%s/metrics\n", metricsServer.Addr())
 				}
 			}
 			go func() { errCh <- srv.ServeSSE(addr) }()

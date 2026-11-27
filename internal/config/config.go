@@ -108,8 +108,10 @@ type NamespaceConfig struct {
 
 // ServerConfig configures the server.
 type ServerConfig struct {
+	Host              string        `mapstructure:"host"`
 	LogLevel          string        `mapstructure:"log_level"`
 	MetricsEnabled    bool          `mapstructure:"metrics_enabled"`
+	MetricsHost       string        `mapstructure:"metrics_host"`
 	MetricsPort       int           `mapstructure:"metrics_port"`
 	StructuredLogging bool          `mapstructure:"structured_logging"`
 	RequestIDHeader   string        `mapstructure:"request_id_header"`
@@ -181,8 +183,10 @@ func DefaultConfig() *Config {
 			AllowedNamespaces: []string{}, // Empty = allow all
 		},
 		Server: ServerConfig{
+			Host:              "127.0.0.1",
 			LogLevel:          "info",
 			MetricsEnabled:    true,
+			MetricsHost:       "127.0.0.1",
 			MetricsPort:       9811,
 			StructuredLogging: true,
 			RequestIDHeader:   "X-PetalFlow-Request-ID",
@@ -284,8 +288,11 @@ func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("retention.entity_stale_days", cfg.Retention.EntityStaleDays)
 	v.SetDefault("retention.context_run_retention_days", cfg.Retention.ContextRunRetentionDays)
 	v.SetDefault("retention.gc_interval", cfg.Retention.GCInterval)
+	v.SetDefault("namespace.allowed_namespaces", cfg.Namespace.AllowedNamespaces)
+	v.SetDefault("server.host", cfg.Server.Host)
 	v.SetDefault("server.log_level", cfg.Server.LogLevel)
 	v.SetDefault("server.metrics_enabled", cfg.Server.MetricsEnabled)
+	v.SetDefault("server.metrics_host", cfg.Server.MetricsHost)
 	v.SetDefault("server.metrics_port", cfg.Server.MetricsPort)
 	v.SetDefault("server.structured_logging", cfg.Server.StructuredLogging)
 	v.SetDefault("server.request_id_header", cfg.Server.RequestIDHeader)

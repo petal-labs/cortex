@@ -24,7 +24,7 @@ type ExportData struct {
 	ContextHistory []*ContextHistoryExport `json:"context_history,omitempty"`
 
 	// Entity data
-	Entities      []*types.Entity             `json:"entities,omitempty"`
+	Entities      []*EntityExport             `json:"entities,omitempty"`
 	EntityAliases []*EntityAliasExport        `json:"entity_aliases,omitempty"`
 	Mentions      []*types.EntityMention      `json:"entity_mentions,omitempty"`
 	Relationships []*types.EntityRelationship `json:"entity_relationships,omitempty"`
@@ -49,6 +49,12 @@ type DocumentExport struct {
 // ChunkExport includes chunk data with embedding.
 type ChunkExport struct {
 	*types.Chunk
+	Embedding []float32 `json:"embedding,omitempty"`
+}
+
+// EntityExport includes entity data with optional embedding.
+type EntityExport struct {
+	*types.Entity
 	Embedding []float32 `json:"embedding,omitempty"`
 }
 

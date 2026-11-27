@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,21 +27,26 @@ import (
 	"github.com/petal-labs/cortex/pkg/types"
 )
 
+// DefaultSSEAddr is the default loopback listen address for MCP SSE transport.
+const DefaultSSEAddr = "127.0.0.1:9810"
+
 // Server is the MCP server for Cortex.
 type Server struct {
-	mcp              *server.MCPServer
-	conversation     *conversation.Engine
-	knowledge        *knowledge.Engine
-	context          *ctxengine.Engine
-	entity           *entity.Engine
-	allowedNamespace string
+	mcp                  *server.MCPServer
+	conversation         *conversation.Engine
+	knowledge            *knowledge.Engine
+	context              *ctxengine.Engine
+	entity               *entity.Engine
+	allowedNamespaces    map[string]struct{}
+	allowedNamespaceList []string
 }
 
 // Config holds configuration for the MCP server.
 type Config struct {
-	Name             string
-	Version          string
-	AllowedNamespace string // Empty means all namespaces allowed
+	Name              string
+	Version           string
+	AllowedNamespace  string   // Single-namespace restriction (overrides AllowedNamespaces when non-empty)
+	AllowedNamespaces []string // Allowlist of namespaces; empty means all non-empty namespaces allowed
 }
 
 // New creates a new MCP server with all Cortex tools registered.
@@ -50,11 +58,29 @@ func New(
 	entityEngine *entity.Engine,
 ) *Server {
 	s := &Server{
-		conversation:     conversationEngine,
-		knowledge:        knowledgeEngine,
-		context:          contextEngine,
-		entity:           entityEngine,
-		allowedNamespace: cfg.AllowedNamespace,
+		conversation: conversationEngine,
+		knowledge:    knowledgeEngine,
+		context:      contextEngine,
+		entity:       entityEngine,
+	}
+
+	// Build namespace allowlist. Single AllowedNamespace (e.g. CLI --namespace)
+	// takes precedence over AllowedNamespaces (e.g. config namespace.allowed_namespaces).
+	if ns := strings.TrimSpace(cfg.AllowedNamespace); ns != "" {
+		s.allowedNamespaces = map[string]struct{}{ns: {}}
+		s.allowedNamespaceList = []string{ns}
+	} else if len(cfg.AllowedNamespaces) > 0 {
+		s.allowedNamespaces = make(map[string]struct{}, len(cfg.AllowedNamespaces))
+		for _, raw := range cfg.AllowedNamespaces {
+			ns := strings.TrimSpace(raw)
+			if ns == "" {
+				continue
+			}
+			if _, exists := s.allowedNamespaces[ns]; !exists {
+				s.allowedNamespaces[ns] = struct{}{}
+				s.allowedNamespaceList = append(s.allowedNamespaceList, ns)
+			}
+		}
 	}
 
 	// Create MCP server
@@ -81,14 +107,31 @@ func (s *Server) ServeStdio() error {
 }
 
 // ServeSSE starts the MCP server using Server-Sent Events transport.
-// The server listens on the specified address (e.g., ":9810").
+// The server listens on the specified address (defaulting to "127.0.0.1:9810" if empty),
+// enforcing Origin/Host validation and HTTP header/idle timeouts.
 func (s *Server) ServeSSE(addr string) error {
-	sseServer := server.NewSSEServer(s.mcp,
-		server.WithSSEEndpoint("/sse"),
-		server.WithMessageEndpoint("/message"),
-		server.WithKeepAlive(true),
-	)
-	return sseServer.Start(addr)
+	httpSrv := s.NewSSEHTTPServer(addr)
+	return httpSrv.ListenAndServe()
+}
+
+// NewSSEHTTPServer builds the configured *http.Server for MCP SSE transport with
+// Origin/Host validation middleware and non-zero ReadHeaderTimeout and IdleTimeout.
+func (s *Server) NewSSEHTTPServer(addr string) *http.Server {
+	if strings.TrimSpace(addr) == "" {
+		addr = DefaultSSEAddr
+	}
+	return &http.Server{
+		Addr:              addr,
+		Handler:           s.SSEHandler(addr),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
+// SSEHandler returns the MCP SSE HTTP handler wrapped with Origin and Host
+// validation middleware appropriate for boundAddr.
+func (s *Server) SSEHandler(boundAddr string) http.Handler {
+	return sseSecurityMiddleware(boundAddr, s.SSEServer())
 }
 
 // SSEServer returns the underlying SSE server for custom HTTP integration.
@@ -101,10 +144,128 @@ func (s *Server) SSEServer() *server.SSEServer {
 	)
 }
 
-// checkNamespace validates that the namespace is allowed.
+// IsLoopbackHost reports whether host names a loopback address (localhost,
+// 127.0.0.0/8, or ::1).
+func IsLoopbackHost(host string) bool {
+	h := strings.TrimSpace(host)
+	h = strings.TrimPrefix(h, "[")
+	h = strings.TrimSuffix(h, "]")
+	if h == "" {
+		return false
+	}
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return IsLoopbackHost(addr)
+	}
+	return IsLoopbackHost(host)
+}
+
+func extractHostOnly(hostPort string) string {
+	h := strings.TrimSpace(hostPort)
+	if h == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		return host
+	}
+	// No port present; strip IPv6 brackets if any.
+	return strings.TrimSuffix(strings.TrimPrefix(h, "["), "]")
+}
+
+func sseSecurityMiddleware(boundAddr string, next http.Handler) http.Handler {
+	loopbackBound := isLoopbackAddr(boundAddr)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mitigate DNS rebinding when bound to a loopback interface.
+		if loopbackBound {
+			reqHost := extractHostOnly(r.Host)
+			if !IsLoopbackHost(reqHost) {
+				http.Error(w, "forbidden: invalid Host header", http.StatusForbidden)
+				return
+			}
+		}
+
+		// Reject untrusted cross-origin browser requests.
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !IsLoopbackHost(u.Hostname()) {
+				http.Error(w, "forbidden: untrusted Origin header", http.StatusForbidden)
+				return
+			}
+		}
+
+		gw := &corsGuardResponseWriter{
+			ResponseWriter: w,
+			allowedOrigin:  origin,
+		}
+		next.ServeHTTP(gw, r)
+	})
+}
+
+// corsGuardResponseWriter prevents downstream handlers (such as mcp-go's
+// SSEServer) from emitting wildcard Access-Control-Allow-Origin: * headers
+// while preserving http.Flusher for SSE streaming.
+type corsGuardResponseWriter struct {
+	http.ResponseWriter
+	allowedOrigin string
+	wroteHeader   bool
+}
+
+func (w *corsGuardResponseWriter) sanitizeCORS() {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	if w.allowedOrigin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", w.allowedOrigin)
+		w.Header().Add("Vary", "Origin")
+	} else {
+		w.Header().Del("Access-Control-Allow-Origin")
+	}
+}
+
+func (w *corsGuardResponseWriter) WriteHeader(code int) {
+	w.sanitizeCORS()
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *corsGuardResponseWriter) Write(p []byte) (int, error) {
+	w.sanitizeCORS()
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *corsGuardResponseWriter) Flush() {
+	w.sanitizeCORS()
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *corsGuardResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// checkNamespace validates that the namespace is non-empty and allowed.
 func (s *Server) checkNamespace(namespace string) error {
-	if s.allowedNamespace != "" && namespace != s.allowedNamespace {
-		return fmt.Errorf("namespace %q not allowed (allowed: %q)", namespace, s.allowedNamespace)
+	ns := strings.TrimSpace(namespace)
+	if ns == "" {
+		return errors.New("namespace cannot be empty")
+	}
+	if len(s.allowedNamespaces) > 0 {
+		if _, ok := s.allowedNamespaces[ns]; !ok {
+			return fmt.Errorf("namespace %q not allowed (allowed: %s)", ns, strings.Join(s.allowedNamespaceList, ", "))
+		}
 	}
 	return nil
 }

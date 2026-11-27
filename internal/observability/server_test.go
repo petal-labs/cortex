@@ -121,3 +121,26 @@ func TestMetricsStillServed(t *testing.T) {
 		t.Errorf("expected 200 from /metrics, got %d", rec.Code)
 	}
 }
+
+func TestMetricsServerDefaultsAndTimeouts(t *testing.T) {
+	s := NewMetricsServer(9811, nil)
+	if s.Addr() != "127.0.0.1:9811" {
+		t.Errorf("expected default metrics bind addr 127.0.0.1:9811, got %q", s.Addr())
+	}
+	if s.server.ReadHeaderTimeout <= 0 {
+		t.Errorf("expected positive ReadHeaderTimeout, got %v", s.server.ReadHeaderTimeout)
+	}
+	if s.server.IdleTimeout <= 0 {
+		t.Errorf("expected positive IdleTimeout, got %v", s.server.IdleTimeout)
+	}
+
+	custom := NewMetricsServerWithHost("0.0.0.0", 9820, nil)
+	if custom.Addr() != "0.0.0.0:9820" {
+		t.Errorf("expected custom metrics bind addr 0.0.0.0:9820, got %q", custom.Addr())
+	}
+
+	emptyHost := NewMetricsServerWithHost("", 9821, nil)
+	if emptyHost.Addr() != "127.0.0.1:9821" {
+		t.Errorf("expected empty host to default to 127.0.0.1:9821, got %q", emptyHost.Addr())
+	}
+}

@@ -119,6 +119,20 @@ func TestValidate(t *testing.T) {
 			wantSubstr: `entity.extraction_dead_letter_policy "explode" is not supported`,
 		},
 		{
+			name: "empty entry in allowed_namespaces",
+			mutate: func(c *Config) {
+				c.Namespace.AllowedNamespaces = []string{"ns-a", ""}
+			},
+			wantSubstr: "namespace.allowed_namespaces[1] must not be empty or whitespace",
+		},
+		{
+			name: "whitespace entry in allowed_namespaces",
+			mutate: func(c *Config) {
+				c.Namespace.AllowedNamespaces = []string{"   "}
+			},
+			wantSubstr: "namespace.allowed_namespaces[0] must not be empty or whitespace",
+		},
+		{
 			name:       "negative retention days",
 			mutate:     func(c *Config) { c.Retention.ConversationRetentionDays = -7 },
 			wantSubstr: "retention.conversation_retention_days must be >= 0",
@@ -413,5 +427,36 @@ storage:
 	}
 	if cfg.Storage.PoolMaxConns != 40 || cfg.Storage.PoolMinConns != 10 {
 		t.Errorf("expected 40/10, got %d/%d", cfg.Storage.PoolMaxConns, cfg.Storage.PoolMinConns)
+	}
+}
+
+func TestLoadNamespaceAndServerHostConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+namespace:
+  allowed_namespaces:
+    - ns-a
+    - ns-b
+server:
+  host: 127.0.0.1
+  metrics_host: 127.0.0.1
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Namespace.AllowedNamespaces) != 2 || cfg.Namespace.AllowedNamespaces[0] != "ns-a" || cfg.Namespace.AllowedNamespaces[1] != "ns-b" {
+		t.Errorf("unexpected allowed_namespaces: %v", cfg.Namespace.AllowedNamespaces)
+	}
+	if cfg.Server.Host != "127.0.0.1" {
+		t.Errorf("expected server.host 127.0.0.1, got %q", cfg.Server.Host)
+	}
+	if cfg.Server.MetricsHost != "127.0.0.1" {
+		t.Errorf("expected server.metrics_host 127.0.0.1, got %q", cfg.Server.MetricsHost)
 	}
 }

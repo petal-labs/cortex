@@ -118,7 +118,9 @@ func init() {
 	knowledgeSearchCmd.Flags().StringP("collection", "c", "", "Limit to collection (optional)")
 	knowledgeSearchCmd.Flags().Int("top-k", 10, "Number of results")
 	knowledgeSearchCmd.Flags().Int("context-window", 1, "Chunks before/after to include")
-	knowledgeSearchCmd.Flags().String("mode", "vector", "Search mode (vector, hybrid, text)")
+	knowledgeSearchCmd.Flags().String("mode", "vector", "Search mode (vector, hybrid, text, graph)")
+	knowledgeSearchCmd.Flags().Bool("graph-context", false, "Include compact graph_context (entities and triples) in graph search output")
+	knowledgeSearchCmd.Flags().Int("max-hops", 2, "Max entity relationship hops for graph search (1-2)")
 
 	// stats command
 	knowledgeCmd.AddCommand(knowledgeStatsCmd)
@@ -137,6 +139,7 @@ func init() {
 	knowledgeCreateCollectionCmd.Flags().String("chunk-strategy", "sentence", "Chunking strategy (fixed, sentence, paragraph, semantic)")
 	knowledgeCreateCollectionCmd.Flags().Int("chunk-max-tokens", 512, "Max tokens per chunk")
 	knowledgeCreateCollectionCmd.Flags().Int("chunk-overlap", 50, "Token overlap between chunks")
+	knowledgeCreateCollectionCmd.Flags().Bool("graph-enabled", false, "Enable async entity/triple extraction for Graph RAG on this collection")
 	knowledgeCreateCollectionCmd.MarkFlagRequired("name")
 }
 
@@ -371,11 +374,15 @@ func runKnowledgeSearch(cmd *cobra.Command, args []string) error {
 	contextWindow, _ := cmd.Flags().GetInt("context-window")
 
 	mode, _ := cmd.Flags().GetString("mode")
+	graphContext, _ := cmd.Flags().GetBool("graph-context")
+	maxHops, _ := cmd.Flags().GetInt("max-hops")
 
 	opts := &knowledge.SearchOpts{
-		TopK:          topK,
-		ContextWindow: contextWindow,
-		SearchMode:    knowledge.SearchMode(mode),
+		TopK:                topK,
+		ContextWindow:       contextWindow,
+		SearchMode:          knowledge.SearchMode(mode),
+		IncludeGraphContext: graphContext,
+		MaxHops:             maxHops,
 	}
 	if collection != "" {
 		opts.CollectionID = &collection
@@ -403,6 +410,31 @@ func runKnowledgeSearch(cmd *cobra.Command, args []string) error {
 
 		if r.ContextAfter != "" {
 			fmt.Printf("\n[Context after]\n%s\n", r.ContextAfter)
+		}
+		fmt.Println()
+	}
+
+	if result.GraphContext != nil && (len(result.GraphContext.Entities) > 0 || len(result.GraphContext.Relationships) > 0) {
+		fmt.Println("=== Graph Context ===")
+		if len(result.GraphContext.Entities) > 0 {
+			fmt.Println("Entities:")
+			for _, e := range result.GraphContext.Entities {
+				if e.Summary != "" {
+					fmt.Printf("  - %s (%s): %s\n", e.Name, e.Type, e.Summary)
+				} else {
+					fmt.Printf("  - %s (%s)\n", e.Name, e.Type)
+				}
+			}
+		}
+		if len(result.GraphContext.Relationships) > 0 {
+			fmt.Println("Relationships:")
+			for _, rel := range result.GraphContext.Relationships {
+				fmt.Printf("  - %s --[%s]--> %s", rel.Source, rel.RelationType, rel.Target)
+				if rel.Description != "" {
+					fmt.Printf(": %s", rel.Description)
+				}
+				fmt.Println()
+			}
 		}
 		fmt.Println()
 	}
@@ -467,6 +499,7 @@ func runKnowledgeStats(cmd *cobra.Command, args []string) error {
 func printCollectionStats(col *types.Collection, stats *types.CollectionStats) {
 	fmt.Printf("Collection: %s\n", col.ID)
 	fmt.Printf("  Name: %s\n", col.Name)
+	fmt.Printf("  Graph RAG: %v\n", col.GraphEnabled)
 	fmt.Printf("  Documents: %d\n", stats.DocumentCount)
 	fmt.Printf("  Chunks: %d\n", stats.ChunkCount)
 	fmt.Printf("  Total tokens: %d\n", stats.TotalTokens)
@@ -509,6 +542,7 @@ func runKnowledgeCollections(cmd *cobra.Command, args []string) error {
 			fmt.Printf("    Description: %s\n", col.Description)
 		}
 		fmt.Printf("    Chunk strategy: %s\n", col.ChunkConfig.Strategy)
+		fmt.Printf("    Graph RAG: %v\n", col.GraphEnabled)
 		fmt.Printf("    Created: %s\n", col.CreatedAt.Format("2006-01-02 15:04:05"))
 		fmt.Println()
 	}
@@ -528,6 +562,7 @@ func runKnowledgeCreateCollection(cmd *cobra.Command, args []string) error {
 	chunkStrategy, _ := cmd.Flags().GetString("chunk-strategy")
 	maxTokens, _ := cmd.Flags().GetInt("chunk-max-tokens")
 	overlap, _ := cmd.Flags().GetInt("chunk-overlap")
+	graphEnabled, _ := cmd.Flags().GetBool("graph-enabled")
 
 	ctx := context.Background()
 
@@ -539,6 +574,7 @@ func runKnowledgeCreateCollection(cmd *cobra.Command, args []string) error {
 			MaxTokens: maxTokens,
 			Overlap:   overlap,
 		},
+		GraphEnabled: graphEnabled,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create collection: %w", err)
@@ -546,6 +582,7 @@ func runKnowledgeCreateCollection(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Created collection: %s\n", collection.ID)
 	fmt.Printf("  Name: %s\n", collection.Name)
+	fmt.Printf("  Graph RAG: %v\n", collection.GraphEnabled)
 	if collection.Description != "" {
 		fmt.Printf("  Description: %s\n", collection.Description)
 	}

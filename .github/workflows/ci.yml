@@ -40,15 +40,15 @@ jobs:
           echo "CGO_CFLAGS=-I$PWD/sqlite-amalgamation-$sqliteVersion" >> $env:GITHUB_ENV
 
       - name: Build
-        run: go build ./...
+        run: go build -tags sqlite_fts5 ./...
 
       - name: Test
         if: matrix.os != 'ubuntu-latest'
-        run: go test ./...
+        run: go test -tags sqlite_fts5 ./...
 
       - name: Test with coverage
         if: matrix.os == 'ubuntu-latest'
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -tags sqlite_fts5 -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage artifact
         if: matrix.os == 'ubuntu-latest'
@@ -68,7 +68,7 @@ jobs:
           verbose: true
 
       - name: Vet
-        run: go vet ./...
+        run: go vet -tags sqlite_fts5 ./...
 
       - name: Format check
         shell: bash
@@ -91,7 +91,7 @@ jobs:
           cache: true
 
       - name: Run dual-backend conformance suite
-        run: go test -v -race -run Conformance ./internal/storage/...
+        run: go test -tags sqlite_fts5 -v -race -run Conformance ./internal/storage/...
 
   lint:
     runs-on: ubuntu-latest
@@ -107,6 +107,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.1.6
+          args: --build-tags=sqlite_fts5
 
   security:
     name: Security Scan
@@ -137,4 +138,4 @@ jobs:
           cache: true
 
       - name: Build
-        run: go build -o cortex ./cmd/cortex
+        run: go build -tags sqlite_fts5 -o cortex ./cmd/cortex

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "entity": {
     "id": "ent-1",
     "namespace": "ns",

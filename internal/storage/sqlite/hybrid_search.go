@@ -97,7 +97,7 @@ func (b *Backend) vectorSearchMessages(ctx context.Context, namespace string, em
 	query += " ORDER BY distance ASC LIMIT ?"
 	args = append(args, topK)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (b *Backend) ftsSearchMessages(ctx context.Context, namespace string, query
 	sqlQuery += " ORDER BY bm25_score LIMIT ?"
 	args = append(args, topK)
 
-	rows, err := b.db.QueryContext(ctx, sqlQuery, args...)
+	rows, err := b.reader().QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		// If FTS table doesn't exist or query fails, return empty results
 		if strings.Contains(err.Error(), "no such table") {
@@ -286,7 +286,7 @@ func (b *Backend) vectorSearchChunks(ctx context.Context, namespace string, embe
 	query += " ORDER BY distance ASC LIMIT ?"
 	args = append(args, topK)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func (b *Backend) ftsSearchChunks(ctx context.Context, namespace string, query s
 	sqlQuery += " ORDER BY bm25_score LIMIT ?"
 	args = append(args, topK)
 
-	rows, err := b.db.QueryContext(ctx, sqlQuery, args...)
+	rows, err := b.reader().QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {
 			return nil, nil
@@ -468,7 +468,7 @@ func (b *Backend) vectorSearchEntities(ctx context.Context, namespace string, em
 	query += " ORDER BY distance ASC LIMIT ?"
 	args = append(args, topK)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -537,7 +537,7 @@ func (b *Backend) ftsSearchEntities(ctx context.Context, namespace string, query
 	sqlQuery += " ORDER BY bm25_score LIMIT ?"
 	args = append(args, topK)
 
-	rows, err := b.db.QueryContext(ctx, sqlQuery, args...)
+	rows, err := b.reader().QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {
 			return nil, nil

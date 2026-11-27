@@ -24,11 +24,11 @@ func (b *Backend) CreateCollection(ctx context.Context, col *types.Collection) e
 	}
 
 	_, err := b.pool.Exec(ctx, `
-		INSERT INTO collections (id, namespace, name, description, chunk_strategy, chunk_max_tokens, chunk_overlap, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO collections (id, namespace, name, description, chunk_strategy, chunk_max_tokens, chunk_overlap, graph_enabled, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, col.ID, col.Namespace, col.Name, col.Description,
 		col.ChunkConfig.Strategy, col.ChunkConfig.MaxTokens, col.ChunkConfig.Overlap,
-		col.CreatedAt)
+		col.GraphEnabled, col.CreatedAt)
 
 	if err != nil {
 		if isUniqueConstraintError(err) {
@@ -48,12 +48,12 @@ func (b *Backend) GetCollection(ctx context.Context, namespace, collectionID str
 	var maxTokens, overlap int
 
 	err := b.pool.QueryRow(ctx, `
-		SELECT id, namespace, name, description, chunk_strategy, chunk_max_tokens, chunk_overlap, created_at
+		SELECT id, namespace, name, description, chunk_strategy, chunk_max_tokens, chunk_overlap, graph_enabled, created_at
 		FROM collections
 		WHERE id = $1 AND namespace = $2
 	`, collectionID, namespace).Scan(
 		&col.ID, &col.Namespace, &col.Name, &description,
-		&strategy, &maxTokens, &overlap, &col.CreatedAt,
+		&strategy, &maxTokens, &overlap, &col.GraphEnabled, &col.CreatedAt,
 	)
 
 	if err == pgx.ErrNoRows {
@@ -84,7 +84,7 @@ func (b *Backend) ListCollections(ctx context.Context, namespace string, cursor 
 
 	var args []any
 	query := `
-		SELECT id, namespace, name, description, chunk_strategy, chunk_max_tokens, chunk_overlap, created_at
+		SELECT id, namespace, name, description, chunk_strategy, chunk_max_tokens, chunk_overlap, graph_enabled, created_at
 		FROM collections
 		WHERE namespace = $1
 	`
@@ -115,7 +115,7 @@ func (b *Backend) ListCollections(ctx context.Context, namespace string, cursor 
 
 		if err := rows.Scan(
 			&col.ID, &col.Namespace, &col.Name, &description,
-			&strategy, &maxTokens, &overlap, &col.CreatedAt,
+			&strategy, &maxTokens, &overlap, &col.GraphEnabled, &col.CreatedAt,
 		); err != nil {
 			return nil, "", fmt.Errorf("failed to scan collection: %w", err)
 		}

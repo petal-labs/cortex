@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "results": [
+    {
+      "chunk": {
+        "id": "chunk-1",
+        "document_id": "doc-1",
+        "namespace": "ns",
+        "collection_id": "col-1",
+        "content": "chunk content",
+        "index": 0,
+        "token_count": 2
+      },
+      "score": 0.91,
+      "rank": 1,
+      "document_title": "Doc",
+      "source": "test://src"
+    }
+  ],
+  "graph_context": {
+    "entities": [
+      {
+        "id": "ent-1",
+        "name": "PaymentsDB",
+        "type": "product",
+        "summary": "Primary transactional database",
+        "score": 0.42
+      }
+    ],
+    "relationships": [
+      {
+        "source": "Checkout Gateway",
+        "target": "PaymentsDB",
+        "relation_type": "persists_in",
+        "description": "Persists order state",
+        "confidence": 0.95,
+        "score": 0.61
+      }
+    ]
+  },
+  "query": "chunk",
+  "total_found": 1
+}

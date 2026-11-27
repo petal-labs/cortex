@@ -26,12 +26,13 @@ func newChunkConfig(c types.ChunkConfig) ChunkConfig {
 
 // Collection mirrors types.Collection.
 type Collection struct {
-	ID          string      `json:"id"`
-	Namespace   string      `json:"namespace"`
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	ChunkConfig ChunkConfig `json:"chunk_config"`
-	CreatedAt   time.Time   `json:"created_at"`
+	ID           string      `json:"id"`
+	Namespace    string      `json:"namespace"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description,omitempty"`
+	ChunkConfig  ChunkConfig `json:"chunk_config"`
+	GraphEnabled bool        `json:"graph_enabled"`
+	CreatedAt    time.Time   `json:"created_at"`
 }
 
 func newCollection(c *types.Collection) *Collection {
@@ -39,12 +40,13 @@ func newCollection(c *types.Collection) *Collection {
 		return nil
 	}
 	return &Collection{
-		ID:          c.ID,
-		Namespace:   c.Namespace,
-		Name:        c.Name,
-		Description: c.Description,
-		ChunkConfig: newChunkConfig(c.ChunkConfig),
-		CreatedAt:   c.CreatedAt,
+		ID:           c.ID,
+		Namespace:    c.Namespace,
+		Name:         c.Name,
+		Description:  c.Description,
+		ChunkConfig:  newChunkConfig(c.ChunkConfig),
+		GraphEnabled: c.GraphEnabled,
+		CreatedAt:    c.CreatedAt,
 	}
 }
 
@@ -130,12 +132,68 @@ func NewKnowledgeIngest(r *knowledge.IngestResult) KnowledgeIngest {
 	}
 }
 
+// GraphContextEntity is a compact entity included in graph search context.
+type GraphContextEntity struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Type    string  `json:"type"`
+	Summary string  `json:"summary,omitempty"`
+	Score   float64 `json:"score"`
+}
+
+// GraphContextRelationship is a compact typed triple included in graph search context.
+type GraphContextRelationship struct {
+	Source       string  `json:"source"`
+	Target       string  `json:"target"`
+	RelationType string  `json:"relation_type"`
+	Description  string  `json:"description,omitempty"`
+	Confidence   float64 `json:"confidence"`
+	Score        float64 `json:"score"`
+}
+
+// GraphContext carries the compact subgraph explaining how returned chunks connect.
+type GraphContext struct {
+	Entities      []GraphContextEntity       `json:"entities"`
+	Relationships []GraphContextRelationship `json:"relationships"`
+}
+
+func newGraphContext(g *types.GraphContext) *GraphContext {
+	if g == nil {
+		return nil
+	}
+	out := &GraphContext{
+		Entities:      make([]GraphContextEntity, 0, len(g.Entities)),
+		Relationships: make([]GraphContextRelationship, 0, len(g.Relationships)),
+	}
+	for _, e := range g.Entities {
+		out.Entities = append(out.Entities, GraphContextEntity{
+			ID:      e.ID,
+			Name:    e.Name,
+			Type:    string(e.Type),
+			Summary: e.Summary,
+			Score:   e.Score,
+		})
+	}
+	for _, r := range g.Relationships {
+		out.Relationships = append(out.Relationships, GraphContextRelationship{
+			Source:       r.Source,
+			Target:       r.Target,
+			RelationType: r.RelationType,
+			Description:  r.Description,
+			Confidence:   r.Confidence,
+			Score:        r.Score,
+		})
+	}
+	return out
+}
+
 // KnowledgeSearch is the knowledge_search response.
 type KnowledgeSearch struct {
 	Contract
-	Results    []ChunkResult `json:"results"`
-	Query      string        `json:"query"`
-	TotalFound int           `json:"total_found"`
+	Results      []ChunkResult `json:"results"`
+	GraphContext *GraphContext `json:"graph_context,omitempty"`
+	Query        string        `json:"query"`
+	TotalFound   int           `json:"total_found"`
 }
 
 // NewKnowledgeSearch maps an engine search result.
@@ -144,10 +202,11 @@ func NewKnowledgeSearch(r *knowledge.SearchResult) KnowledgeSearch {
 		return KnowledgeSearch{Contract: Contract{SchemaVersion}, Results: []ChunkResult{}}
 	}
 	out := KnowledgeSearch{
-		Contract:   Contract{SchemaVersion},
-		Results:    make([]ChunkResult, 0, len(r.Results)),
-		Query:      r.Query,
-		TotalFound: r.TotalFound,
+		Contract:     Contract{SchemaVersion},
+		Results:      make([]ChunkResult, 0, len(r.Results)),
+		GraphContext: newGraphContext(r.GraphContext),
+		Query:        r.Query,
+		TotalFound:   r.TotalFound,
 	}
 	for _, res := range r.Results {
 		out.Results = append(out.Results, *newChunkResult(res))

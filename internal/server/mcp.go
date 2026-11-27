@@ -279,11 +279,17 @@ func (s *Server) registerKnowledgeTools() {
 			mcp.Description("Number of adjacent chunks to include (default: 1)"),
 		),
 		mcp.WithString("search_mode",
-			mcp.Description("Search mode: vector (semantic similarity), hybrid (vector+text with RRF), or text (BM25 full-text)"),
-			mcp.Enum("vector", "hybrid", "text"),
+			mcp.Description("Search mode: vector (semantic similarity), hybrid (vector+text with RRF), text (BM25 full-text), or graph (zero-LLM HippoRAG bipartite PPR)"),
+			mcp.Enum("vector", "hybrid", "text", "graph"),
 		),
 		mcp.WithNumber("alpha",
 			mcp.Description("Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)"),
+		),
+		mcp.WithBoolean("include_graph_context",
+			mcp.Description("Include compact graph_context (matched entities and typed triples) in graph search results (default: true when search_mode is graph)"),
+		),
+		mcp.WithNumber("max_hops",
+			mcp.Description("Max entity relationship hops for graph search: 1 or 2 (default: 2)"),
 		),
 		mcp.WithOutputSchema[dto.KnowledgeSearch](),
 	)
@@ -312,6 +318,9 @@ func (s *Server) registerKnowledgeTools() {
 		),
 		mcp.WithObject("chunk_config",
 			mcp.Description("Default chunk config for new documents (for create)"),
+		),
+		mcp.WithBoolean("graph_enabled",
+			mcp.Description("Opt-in to async entity and typed triple extraction for Graph RAG on ingested documents (for create, default: false)"),
 		),
 		mcp.WithOutputSchema[dto.KnowledgeCollectionList](),
 	)
@@ -1118,6 +1127,8 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 		opts.SearchMode = knowledge.SearchModeHybrid
 	case "text":
 		opts.SearchMode = knowledge.SearchModeText
+	case "graph":
+		opts.SearchMode = knowledge.SearchModeGraph
 	default:
 		opts.SearchMode = knowledge.SearchModeVector
 	}
@@ -1126,6 +1137,21 @@ func (s *Server) handleKnowledgeSearch(ctx context.Context, req mcp.CallToolRequ
 	if errResult != nil {
 		return errResult, nil
 	}
+
+	defaultGraphCtx := opts.SearchMode == knowledge.SearchModeGraph
+	opts.IncludeGraphContext, errResult = optBool(args, "include_graph_context", defaultGraphCtx)
+	if errResult != nil {
+		return errResult, nil
+	}
+
+	maxHops, errResult := optInt(args, "max_hops", 0)
+	if errResult != nil {
+		return errResult, nil
+	}
+	if maxHops < 0 || maxHops > 2 {
+		return mcp.NewToolResultError(`parameter "max_hops" must be 1 or 2`), nil
+	}
+	opts.MaxHops = maxHops
 
 	result, err := s.knowledge.Search(ctx, namespace, query, opts)
 	if err != nil {
@@ -1175,6 +1201,11 @@ func (s *Server) handleKnowledgeCollections(ctx context.Context, req mcp.CallToo
 		if chunkConfig, ok := args["chunk_config"].(map[string]any); ok {
 			opts.ChunkConfig = parseChunkConfig(chunkConfig)
 		}
+		graphEnabled, errResult := optBool(args, "graph_enabled", false)
+		if errResult != nil {
+			return errResult, nil
+		}
+		opts.GraphEnabled = graphEnabled
 
 		result, err := s.knowledge.CreateCollection(ctx, namespace, opts)
 		if err != nil {

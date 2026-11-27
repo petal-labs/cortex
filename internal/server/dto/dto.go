@@ -13,7 +13,7 @@ package dto
 // SchemaVersion is the current response contract version. Bump when a
 // breaking change is made to any DTO's wire shape; clients can branch on
 // schema_version to migrate.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Contract is embedded in every top-level response DTO and flattens to a
 // top-level schema_version field in the marshaled JSON.

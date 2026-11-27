@@ -5,6 +5,81 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - Unreleased
+
+Adds zero-LLM-at-query-time Vector-Graph RAG (HippoRAG-style bipartite
+Personalized PageRank over Cortex's entity/relationship graph), upgrades the
+MCP response contract to `schema_version: 2`, and splits SQLite WAL reads and
+writes for concurrent query throughput.
+
+### Upgrading from 1.x
+
+- **MCP response contract (`schema_version: 2`).** Every MCP tool response now
+  stamps `"schema_version": 2`. `knowledge_collections` responses include
+  `"graph_enabled": false|true`, and `knowledge_search` accepts
+  `search_mode: "graph"`, `include_graph_context`, and `max_hops` (`1` or `2`),
+  returning an optional `graph_context` object when requested.
+- **Graph RAG is opt-in per collection.** Existing and newly created
+  collections default to `graph_enabled: false` so chunk entity extraction does
+  not unexpectedly incur LLM extraction costs. Enable it on collections that
+  need multi-hop graph retrieval (`--graph-enabled` in CLI or
+  `graph_enabled: true` in `knowledge_collections`).
+- **Build tag `-tags sqlite_fts5`.** Source builds now require
+  `-tags sqlite_fts5` (enabled automatically by `make build`, CI, and release
+  workflows) so SQLite FTS5 tables (`chunks_fts`, `entities_fts`,
+  `relationships_fts`) are active.
+- **No manual migration step.** SQLite (migration v4) and pgvector (migration
+  v3) apply pending schema changes automatically on startup, including
+  backfilling `relationships_fts` / `search_tsvector` for existing
+  relationships.
+
+### Added
+
+- **Vector-Graph RAG (`internal/graphrag/`)**
+  - Zero-LLM-at-query-time multi-hop retrieval (`search_mode: "graph"`)
+    combining hybrid chunk seeding, FTS relationship seeding
+    (`relationships_fts` on SQLite / `search_tsvector` GIN on PostgreSQL),
+    entity lexical/vector seeding, bounded 1–2 hop subgraph expansion, and
+    pure-Go bipartite Personalized PageRank (PPR).
+  - Optional `graph_context` payload on `knowledge_search` containing compact
+    top entities and typed relationships explaining how retrieved chunks
+    connect.
+  - Deterministic offline multi-hop evaluation harness
+    (`internal/graphrag/eval_test.go`) and 25K-chunk SQLite benchmark
+    (`CORTEX_RUN_25K_BENCH=1`).
+- **Opt-in Collection Graph Extraction**
+  - `collections.graph_enabled` column (default `false`) across SQLite and
+    pgvector backends, exposed via `pkg/types.Collection`, MCP
+    `knowledge_collections`, and `cortex knowledge create-collection --graph-enabled`.
+  - Knowledge ingestion gates chunk entity-extraction enqueueing on
+    `collection.GraphEnabled`.
+- **Entity Extraction & Resolution Upgrades**
+  - Single-call entity + summary + typed relationship extraction in
+    `internal/entity/extractor.go` (replaces `O(n^2)` co-occurrence cliques).
+  - Bounded top-3 cosine `synonym_of` edge linking (`>= 0.85`) and prefix-based
+    candidate resolution (`FindEntityCandidatesByPrefix`, lifting the previous
+    1,000-entity resolution cap).
+- **Storage & Concurrency**
+  - SQLite WAL read/write pool split (`writeDB` serialized `MaxOpenConns(1)` +
+    `readDB` read-only `MaxOpenConns(4)` with `_query_only=1`) so graph
+    queries and reads run concurrently with background extraction writes.
+  - Shared `GraphStorage` contract and dual-backend conformance suite
+    (`internal/storage/conformance/graph.go`).
+- **Observability**
+  - Prometheus metrics: `cortex_graph_ppr_duration_seconds`,
+    `cortex_graph_subgraph_nodes`, and `cortex_graph_subgraph_edges`.
+- **CLI**
+  - `cortex knowledge search --mode graph [--graph-context] [--max-hops 1|2]`.
+  - `cortex knowledge create-collection --graph-enabled`.
+
+### Changed
+
+- **BREAKING (MCP Wire Contract)** — Bumped `dto.SchemaVersion` from `1` to
+  `2`; added `graph_enabled` to `Collection` DTOs and optional `graph_context`
+  to `KnowledgeSearch` DTOs.
+- **Build & CI** — Added `-tags sqlite_fts5` to `Makefile`, CI, and release
+  workflows so SQLite FTS5 search is enabled in all standard builds and tests.
+
 ## [1.1.1] - 2026-08-17
 
 ### Added

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "ent-1",
   "namespace": "ns",
   "name": "Acme",

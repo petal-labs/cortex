@@ -34,8 +34,10 @@ var documentedCommands = []struct {
 	// the table and the flag from separating again.
 	{"knowledge search", []string{"error handling", "--mode", "text"}},
 	{"knowledge search", []string{"machine learning", "--mode", "vector"}},
+	{"knowledge search", []string{"how services connect", "--mode", "graph", "--graph-context", "--max-hops", "2"}},
 	{"knowledge collections", nil},
 	{"knowledge create-collection", []string{"--name", "research", "--description", "Research papers"}},
+	{"knowledge create-collection", []string{"--name", "architecture", "--description", "Architecture docs", "--graph-enabled"}},
 	{"knowledge stats", nil},
 
 	// Conversation (README + cli-basics)

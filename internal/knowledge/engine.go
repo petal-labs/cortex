@@ -12,6 +12,8 @@ import (
 
 	"github.com/petal-labs/cortex/internal/config"
 	"github.com/petal-labs/cortex/internal/embedding"
+	"github.com/petal-labs/cortex/internal/graphrag"
+	"github.com/petal-labs/cortex/internal/observability"
 	"github.com/petal-labs/cortex/internal/storage"
 	"github.com/petal-labs/cortex/pkg/types"
 )
@@ -225,9 +227,11 @@ func (e *Engine) Ingest(ctx context.Context, namespace, collectionID, content st
 		return nil, fmt.Errorf("failed to insert chunks: %w", err)
 	}
 
-	// Queue chunks for entity extraction
-	for _, chunk := range chunks {
-		e.enqueueForExtraction(ctx, namespace, chunk.ID, chunk.Content)
+	// Queue chunks for entity/triple extraction only on opt-in graph-enabled collections.
+	if collection.GraphEnabled {
+		for _, chunk := range chunks {
+			e.enqueueForExtraction(ctx, namespace, chunk.ID, chunk.Content)
+		}
 	}
 
 	return &IngestResult{
@@ -420,27 +424,33 @@ const (
 	SearchModeHybrid SearchMode = "hybrid"
 	// SearchModeText uses pure full-text search (BM25).
 	SearchModeText SearchMode = "text"
+	// SearchModeGraph uses zero-LLM HippoRAG-style bipartite PPR over entities,
+	// relationships (FTS), and chunks.
+	SearchModeGraph SearchMode = "graph"
 )
 
 // SearchOpts contains options for knowledge search.
 type SearchOpts struct {
-	CollectionID  *string           // Optional: limit to specific collection
-	TopK          int               // Number of results (0 = default 10)
-	MinScore      float64           // Minimum similarity score (0-1)
-	Filters       map[string]string // Metadata filters
-	ContextWindow int               // Chunks before/after to include (0 = none)
-	SearchMode    SearchMode        // Search mode: "vector" (default), "hybrid", or "text"
-	Alpha         float64           // Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)
+	CollectionID        *string           // Optional: limit to specific collection
+	TopK                int               // Number of results (0 = default 10)
+	MinScore            float64           // Minimum similarity score (0-1)
+	Filters             map[string]string // Metadata filters
+	ContextWindow       int               // Chunks before/after to include (0 = none)
+	SearchMode          SearchMode        // Search mode: "vector" (default), "hybrid", "text", or "graph"
+	Alpha               float64           // Hybrid search weight: 0=pure text, 1=pure vector, 0.5=equal (default: 0.5)
+	IncludeGraphContext bool              // Include compact subgraph (entities + triples) in response (graph mode)
+	MaxHops             int               // Max entity relationship hops in graph mode (1..2, default: 2)
 }
 
 // SearchResult contains search results with optional context.
 type SearchResult struct {
-	Results    []*types.ChunkResult `json:"results"`
-	Query      string               `json:"query"`
-	TotalFound int                  `json:"total_found"`
+	Results      []*types.ChunkResult `json:"results"`
+	GraphContext *types.GraphContext  `json:"graph_context,omitempty"`
+	Query        string               `json:"query"`
+	TotalFound   int                  `json:"total_found"`
 }
 
-// Search performs semantic search across knowledge in a namespace.
+// Search performs semantic, hybrid, text, or graph-augmented search across knowledge in a namespace.
 func (e *Engine) Search(ctx context.Context, namespace, query string, opts *SearchOpts) (*SearchResult, error) {
 	if query == "" {
 		return nil, errors.New("search query cannot be empty")
@@ -462,9 +472,50 @@ func (e *Engine) Search(ctx context.Context, namespace, query string, opts *Sear
 	}
 
 	var results []*types.ChunkResult
+	var graphCtx *types.GraphContext
 	var err error
 
 	switch opts.SearchMode {
+	case SearchModeGraph:
+		if e.embedding == nil {
+			return nil, ErrEmbeddingRequired
+		}
+		queryEmb, embErr := e.embedding.Embed(ctx, query)
+		if embErr != nil {
+			return nil, fmt.Errorf("failed to generate query embedding: %w", embErr)
+		}
+
+		graphCfg := graphrag.DefaultSearchConfig()
+		graphCfg.TopK = topK
+		graphCfg.CollectionID = opts.CollectionID
+		graphCfg.Filters = opts.Filters
+		graphCfg.IncludeGraphContext = opts.IncludeGraphContext
+		if opts.MaxHops > 0 {
+			graphCfg.MaxHops = opts.MaxHops
+		}
+
+		retriever := graphrag.NewRetriever(e.storage)
+		gRes, gErr := retriever.Search(ctx, namespace, query, queryEmb, graphCfg)
+		if gErr != nil {
+			return nil, fmt.Errorf("failed to run graph search: %w", gErr)
+		}
+		results = gRes.Results
+		graphCtx = gRes.GraphContext
+		if opts.MinScore > 0 {
+			filtered := make([]*types.ChunkResult, 0, len(results))
+			for _, r := range results {
+				if r.Score >= opts.MinScore {
+					filtered = append(filtered, r)
+				}
+			}
+			results = filtered
+		}
+		observability.DefaultMetrics.RecordGraphSearch(
+			gRes.Stats.PPRDuration.Seconds(),
+			gRes.Stats.SubgraphNodes,
+			gRes.Stats.SubgraphEdges,
+		)
+
 	case SearchModeText:
 		// Pure text search - use hybrid with alpha=0 (pure text)
 		if e.embedding == nil {
@@ -557,9 +608,10 @@ func (e *Engine) Search(ctx context.Context, namespace, query string, opts *Sear
 	}
 
 	return &SearchResult{
-		Results:    results,
-		Query:      query,
-		TotalFound: len(results),
+		Results:      results,
+		GraphContext: graphCtx,
+		Query:        query,
+		TotalFound:   len(results),
 	}, nil
 }
 
@@ -589,9 +641,10 @@ func (e *Engine) DeleteDocument(ctx context.Context, namespace, docID string) er
 
 // CreateCollectionOpts contains options for creating a collection.
 type CreateCollectionOpts struct {
-	Name        string             // Required: collection name
-	Description string             // Optional description
-	ChunkConfig *types.ChunkConfig // Chunk configuration (uses default if nil)
+	Name         string             // Required: collection name
+	Description  string             // Optional description
+	ChunkConfig  *types.ChunkConfig // Chunk configuration (uses default if nil)
+	GraphEnabled bool               // Opt-in to async entity/triple extraction for Graph RAG
 }
 
 // CreateCollection creates a new collection.
@@ -607,12 +660,13 @@ func (e *Engine) CreateCollection(ctx context.Context, namespace string, opts Cr
 	}
 
 	col := &types.Collection{
-		ID:          collectionID,
-		Namespace:   namespace,
-		Name:        opts.Name,
-		Description: opts.Description,
-		ChunkConfig: chunkConfig,
-		CreatedAt:   time.Now().UTC(),
+		ID:           collectionID,
+		Namespace:    namespace,
+		Name:         opts.Name,
+		Description:  opts.Description,
+		ChunkConfig:  chunkConfig,
+		GraphEnabled: opts.GraphEnabled,
+		CreatedAt:    time.Now().UTC(),
 	}
 
 	if err := e.storage.CreateCollection(ctx, col); err != nil {

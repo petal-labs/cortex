@@ -156,12 +156,13 @@ type ExtractionQueueItem struct {
 
 // ExtractedEntity represents an entity extracted from text by the LLM.
 // This is the canonical extracted-entity shape: it matches the extraction
-// structured-output schema (name, type, aliases, attributes, confidence)
+// structured-output schema (name, type, aliases, summary, attributes, confidence)
 // and is used by the extractor, resolver, and queue processor.
 type ExtractedEntity struct {
 	Name       string            `json:"name"`
 	Type       EntityType        `json:"type"`
 	Aliases    []string          `json:"aliases,omitempty"`
+	Summary    string            `json:"summary,omitempty"`
 	Attributes map[string]string `json:"attributes,omitempty"`
 	Confidence float64           `json:"confidence"`
 }
@@ -175,4 +176,11 @@ type ExtractedRelationship struct {
 	RelationType string  `json:"relation_type"`
 	Description  string  `json:"description,omitempty"`
 	Confidence   float64 `json:"confidence"`
+}
+
+// RelationshipResult represents a scored search result for an entity relationship.
+type RelationshipResult struct {
+	Relationship *EntityRelationship `json:"relationship"`
+	Score        float64             `json:"score"`
+	Rank         int                 `json:"rank,omitempty"`
 }

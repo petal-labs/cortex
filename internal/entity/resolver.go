@@ -98,18 +98,9 @@ func (r *Resolver) Resolve(ctx context.Context, namespace, name string) (*Resolv
 
 // getBlockedCandidates retrieves entities that match the blocking criteria.
 // Blocking reduces the search space by only considering entities that:
-// 1. Share the first 3 characters (case-insensitive)
-// 2. Match an initialism pattern
+// 1. Share the first 3 characters (case-insensitive) — served via indexed prefix range scan
+// 2. Match an initialism pattern (for multi-word names or short acronyms)
 func (r *Resolver) getBlockedCandidates(ctx context.Context, namespace, name string) ([]*types.Entity, error) {
-	// Get all entities in namespace for blocking
-	// Note: In production, this should be optimized with proper indexing
-	entities, _, err := r.storage.ListEntities(ctx, namespace, storage.EntityListOpts{
-		Limit: 1000, // Reasonable limit for blocking candidates
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	nameLower := strings.ToLower(name)
 	namePrefix := ""
 	if len(nameLower) >= 3 {
@@ -117,6 +108,40 @@ func (r *Resolver) getBlockedCandidates(ctx context.Context, namespace, name str
 	}
 
 	initialism := extractInitialism(name)
+
+	var entities []*types.Entity
+	var err error
+	if namePrefix != "" && initialism == "" {
+		// Fast indexed range scan on entity_aliases — scales cleanly past 25K entities.
+		entities, err = r.storage.FindEntityCandidatesByPrefix(ctx, namespace, namePrefix, 100)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Merge prefix matches with a bounded fallback scan for initialism matching.
+		seen := make(map[string]bool)
+		if namePrefix != "" {
+			pref, pErr := r.storage.FindEntityCandidatesByPrefix(ctx, namespace, namePrefix, 100)
+			if pErr != nil {
+				return nil, pErr
+			}
+			for _, e := range pref {
+				seen[e.ID] = true
+				entities = append(entities, e)
+			}
+		}
+		listed, _, lErr := r.storage.ListEntities(ctx, namespace, storage.EntityListOpts{
+			Limit: 1000,
+		})
+		if lErr != nil {
+			return nil, lErr
+		}
+		for _, e := range listed {
+			if !seen[e.ID] {
+				entities = append(entities, e)
+			}
+		}
+	}
 
 	var candidates []*types.Entity
 	for _, entity := range entities {

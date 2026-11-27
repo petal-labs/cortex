@@ -48,6 +48,10 @@ func RunSuite(t *testing.T, b storage.Backend, dims int) {
 		testEntity(ctx, t, b, dims)
 	})
 
+	t.Run("Graph", func(t *testing.T) {
+		testGraph(ctx, t, b, dims)
+	})
+
 	t.Run("GarbageCollection", func(t *testing.T) {
 		testGarbageCollection(ctx, t, b, dims)
 	})

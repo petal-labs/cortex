@@ -72,6 +72,20 @@ var knowledgeSearchInput = &knowledge.SearchResult{
 	TotalFound: 1,
 }
 
+var knowledgeSearchGraphInput = &knowledge.SearchResult{
+	Results: knowledgeSearchInput.Results,
+	GraphContext: &types.GraphContext{
+		Entities: []types.GraphContextEntity{
+			{ID: "ent-1", Name: "PaymentsDB", Type: types.EntityTypeProduct, Summary: "Primary transactional database", Score: 0.42},
+		},
+		Relationships: []types.GraphContextRelationship{
+			{Source: "Checkout Gateway", Target: "PaymentsDB", RelationType: "persists_in", Description: "Persists order state", Confidence: 0.95, Score: 0.61},
+		},
+	},
+	Query:      "chunk",
+	TotalFound: 1,
+}
+
 var collectionFixture = &types.Collection{
 	ID:        "col-1",
 	Namespace: "ns",

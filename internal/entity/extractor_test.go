@@ -35,13 +35,52 @@ func TestEntityExtractionSchemaObjectRoot(t *testing.T) {
 		}
 	}
 
+	if _, ok := props["relationships"]; !ok {
+		t.Error("expected schema to have a 'relationships' property")
+	}
+	if rels, ok := props["relationships"].(map[string]any); ok {
+		if rels["type"] != "array" {
+			t.Errorf("expected 'relationships' to be an array, got %v", rels["type"])
+		}
+	}
+
 	required, ok := schema["required"].([]any)
-	if !ok || len(required) != 1 || required[0] != "entities" {
-		t.Errorf("expected required: [\"entities\"], got %v", schema["required"])
+	if !ok || len(required) != 2 || required[0] != "entities" || required[1] != "relationships" {
+		t.Errorf("expected required: [\"entities\", \"relationships\"], got %v", schema["required"])
 	}
 
 	if ap, ok := schema["additionalProperties"].(bool); !ok || ap {
 		t.Error("expected additionalProperties: false at schema root")
+	}
+}
+
+func TestParseExtractionPayload_WithTypedRelationships(t *testing.T) {
+	response := `{
+		"entities": [
+			{"name": "Checkout Gateway", "type": "product", "aliases": ["CGW"], "summary": "Customer checkout service.", "attributes": {}, "confidence": 0.95},
+			{"name": "PaymentsDB", "type": "product", "aliases": null, "summary": "Transactional order database.", "attributes": null, "confidence": 0.93}
+		],
+		"relationships": [
+			{"source_name": "Checkout Gateway", "target_name": "PaymentsDB", "relation_type": "persists in", "description": "Persists order state", "confidence": 0.92}
+		]
+	}`
+
+	entities, rels, err := parseExtractionPayload(response)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entities) != 2 || entities[0].Summary != "Customer checkout service." {
+		t.Fatalf("unexpected entities: %+v", entities)
+	}
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 relationship, got %d", len(rels))
+	}
+	if err := validateExtractedRelationship(&rels[0]); err != nil {
+		t.Fatalf("expected valid relationship, got %v", err)
+	}
+	normalizeExtractedRelationship(&rels[0])
+	if rels[0].RelationType != "persists_in" {
+		t.Errorf("expected normalized relation_type 'persists_in', got %q", rels[0].RelationType)
 	}
 }
 

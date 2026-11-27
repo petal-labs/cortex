@@ -33,12 +33,13 @@ type Chunk struct {
 
 // Collection represents a collection of documents.
 type Collection struct {
-	ID          string      `json:"id"`
-	Namespace   string      `json:"namespace"`
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	ChunkConfig ChunkConfig `json:"chunk_config"`
-	CreatedAt   time.Time   `json:"created_at"`
+	ID           string      `json:"id"`
+	Namespace    string      `json:"namespace"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description,omitempty"`
+	ChunkConfig  ChunkConfig `json:"chunk_config"`
+	GraphEnabled bool        `json:"graph_enabled"`
+	CreatedAt    time.Time   `json:"created_at"`
 }
 
 // ChunkConfig configures how documents are chunked.
@@ -88,8 +89,34 @@ type KnowledgeIngestResponse struct {
 	CollectionID  string `json:"collection_id"`
 }
 
+// GraphContextEntity is a compact entity included in graph search context.
+type GraphContextEntity struct {
+	ID      string     `json:"id"`
+	Name    string     `json:"name"`
+	Type    EntityType `json:"type"`
+	Summary string     `json:"summary,omitempty"`
+	Score   float64    `json:"score"`
+}
+
+// GraphContextRelationship is a compact typed triple included in graph search context.
+type GraphContextRelationship struct {
+	Source       string  `json:"source"`
+	Target       string  `json:"target"`
+	RelationType string  `json:"relation_type"`
+	Description  string  `json:"description,omitempty"`
+	Confidence   float64 `json:"confidence"`
+	Score        float64 `json:"score"`
+}
+
+// GraphContext carries the compact subgraph explaining how returned chunks connect.
+type GraphContext struct {
+	Entities      []GraphContextEntity       `json:"entities"`
+	Relationships []GraphContextRelationship `json:"relationships"`
+}
+
 // KnowledgeSearchResponse represents the response from knowledge.search.
 type KnowledgeSearchResponse struct {
-	Results    []*ChunkResult `json:"results"`
-	TotalFound int            `json:"total_found"`
+	Results      []*ChunkResult `json:"results"`
+	GraphContext *GraphContext  `json:"graph_context,omitempty"`
+	TotalFound   int            `json:"total_found"`
 }

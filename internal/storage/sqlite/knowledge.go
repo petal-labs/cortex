@@ -27,10 +27,15 @@ func (b *Backend) CreateCollection(ctx context.Context, col *types.Collection) e
 		return fmt.Errorf("failed to marshal chunk config: %w", err)
 	}
 
+	graphEnabled := 0
+	if col.GraphEnabled {
+		graphEnabled = 1
+	}
+
 	_, err = b.db.ExecContext(ctx, `
-		INSERT INTO collections (id, namespace, name, description, chunk_config, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, col.ID, col.Namespace, col.Name, col.Description, chunkConfigJSON, col.CreatedAt.Unix())
+		INSERT INTO collections (id, namespace, name, description, chunk_config, graph_enabled, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, col.ID, col.Namespace, col.Name, col.Description, chunkConfigJSON, graphEnabled, col.CreatedAt.Unix())
 
 	if err != nil {
 		// Check for unique constraint violation
@@ -47,13 +52,14 @@ func (b *Backend) CreateCollection(ctx context.Context, col *types.Collection) e
 func (b *Backend) GetCollection(ctx context.Context, namespace, collectionID string) (*types.Collection, error) {
 	col := &types.Collection{}
 	var description, chunkConfigJSON sql.NullString
+	var graphEnabled int
 	var createdAtUnix int64
 
-	err := b.db.QueryRowContext(ctx, `
-		SELECT id, namespace, name, description, chunk_config, created_at
+	err := b.reader().QueryRowContext(ctx, `
+		SELECT id, namespace, name, description, chunk_config, graph_enabled, created_at
 		FROM collections
 		WHERE id = ? AND namespace = ?
-	`, collectionID, namespace).Scan(&col.ID, &col.Namespace, &col.Name, &description, &chunkConfigJSON, &createdAtUnix)
+	`, collectionID, namespace).Scan(&col.ID, &col.Namespace, &col.Name, &description, &chunkConfigJSON, &graphEnabled, &createdAtUnix)
 
 	if err == sql.ErrNoRows {
 		return nil, storage.ErrNotFound
@@ -63,6 +69,7 @@ func (b *Backend) GetCollection(ctx context.Context, namespace, collectionID str
 	}
 
 	col.Description = description.String
+	col.GraphEnabled = graphEnabled != 0
 	col.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
 
 	if chunkConfigJSON.Valid && chunkConfigJSON.String != "" {
@@ -82,7 +89,7 @@ func (b *Backend) ListCollections(ctx context.Context, namespace string, cursor 
 
 	var args []any
 	query := `
-		SELECT id, namespace, name, description, chunk_config, created_at
+		SELECT id, namespace, name, description, chunk_config, graph_enabled, created_at
 		FROM collections
 		WHERE namespace = ?
 	`
@@ -96,7 +103,7 @@ func (b *Backend) ListCollections(ctx context.Context, namespace string, cursor 
 	query += " ORDER BY created_at DESC LIMIT ?"
 	args = append(args, limit+1)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to query collections: %w", err)
 	}
@@ -106,13 +113,15 @@ func (b *Backend) ListCollections(ctx context.Context, namespace string, cursor 
 	for rows.Next() {
 		col := &types.Collection{}
 		var description, chunkConfigJSON sql.NullString
+		var graphEnabled int
 		var createdAtUnix int64
 
-		if err := rows.Scan(&col.ID, &col.Namespace, &col.Name, &description, &chunkConfigJSON, &createdAtUnix); err != nil {
+		if err := rows.Scan(&col.ID, &col.Namespace, &col.Name, &description, &chunkConfigJSON, &graphEnabled, &createdAtUnix); err != nil {
 			return nil, "", fmt.Errorf("failed to scan collection: %w", err)
 		}
 
 		col.Description = description.String
+		col.GraphEnabled = graphEnabled != 0
 		col.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
 
 		if chunkConfigJSON.Valid && chunkConfigJSON.String != "" {
@@ -264,7 +273,7 @@ func (b *Backend) GetDocument(ctx context.Context, namespace, docID string) (*ty
 	var title, source, metadataJSON sql.NullString
 	var createdAtUnix, updatedAtUnix int64
 
-	err := b.db.QueryRowContext(ctx, `
+	err := b.reader().QueryRowContext(ctx, `
 		SELECT id, namespace, collection_id, title, content, content_type, source, metadata, created_at, updated_at
 		FROM documents
 		WHERE id = ? AND namespace = ?
@@ -320,7 +329,7 @@ func (b *Backend) GetAdjacentChunks(ctx context.Context, chunkID string, window 
 	// First, get the chunk's document_id and index
 	var documentID string
 	var chunkIndex int
-	err := b.db.QueryRowContext(ctx,
+	err := b.reader().QueryRowContext(ctx,
 		"SELECT document_id, chunk_index FROM chunks WHERE id = ?",
 		chunkID,
 	).Scan(&documentID, &chunkIndex)
@@ -333,7 +342,7 @@ func (b *Backend) GetAdjacentChunks(ctx context.Context, chunkID string, window 
 	}
 
 	// Get adjacent chunks
-	rows, err := b.db.QueryContext(ctx, `
+	rows, err := b.reader().QueryContext(ctx, `
 		SELECT id, document_id, namespace, collection_id, content, chunk_index, token_count, metadata
 		FROM chunks
 		WHERE document_id = ? AND chunk_index >= ? AND chunk_index <= ?
@@ -381,7 +390,7 @@ func (b *Backend) GetAdjacentChunks(ctx context.Context, chunkID string, window 
 func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID string) (*types.CollectionStats, error) {
 	// First verify collection exists
 	var exists bool
-	err := b.db.QueryRowContext(ctx,
+	err := b.reader().QueryRowContext(ctx,
 		"SELECT EXISTS(SELECT 1 FROM collections WHERE id = ? AND namespace = ?)",
 		collectionID, namespace,
 	).Scan(&exists)
@@ -395,7 +404,7 @@ func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID s
 	stats := &types.CollectionStats{}
 
 	// Get document count
-	err = b.db.QueryRowContext(ctx,
+	err = b.reader().QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM documents WHERE collection_id = ? AND namespace = ?",
 		collectionID, namespace,
 	).Scan(&stats.DocumentCount)
@@ -404,7 +413,7 @@ func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID s
 	}
 
 	// Get chunk count and total tokens
-	err = b.db.QueryRowContext(ctx,
+	err = b.reader().QueryRowContext(ctx,
 		"SELECT COUNT(*), COALESCE(SUM(token_count), 0) FROM chunks WHERE collection_id = ? AND namespace = ?",
 		collectionID, namespace,
 	).Scan(&stats.ChunkCount, &stats.TotalTokens)
@@ -414,7 +423,7 @@ func (b *Backend) CollectionStats(ctx context.Context, namespace, collectionID s
 
 	// Get last ingest time
 	var lastIngestUnix sql.NullInt64
-	err = b.db.QueryRowContext(ctx,
+	err = b.reader().QueryRowContext(ctx,
 		"SELECT MAX(created_at) FROM documents WHERE collection_id = ? AND namespace = ?",
 		collectionID, namespace,
 	).Scan(&lastIngestUnix)
@@ -465,7 +474,7 @@ func (b *Backend) SearchChunks(ctx context.Context, namespace string, embedding 
 	query += " ORDER BY distance ASC LIMIT ?"
 	args = append(args, opts.TopK)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search chunks: %w", err)
 	}

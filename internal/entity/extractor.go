@@ -14,21 +14,32 @@ import (
 	"github.com/petal-labs/cortex/pkg/types"
 )
 
-// ExtractionPrompt is the system prompt for entity extraction.
+// ExtractionPrompt is the system prompt for entity and relationship extraction.
 // With structured output, we don't need to specify the JSON format.
-const ExtractionPrompt = `Extract all named entities from the following text. For each entity, identify:
+const ExtractionPrompt = `Extract all named entities and typed relationships between them from the following text.
+
+For each entity, identify:
 - name: The canonical name of the entity
 - type: Classify as "person", "organization", "product", "location", "concept", "event", or "other"
 - aliases: Any alternative names or abbreviations used in the text
+- summary: A concise one-sentence description of what this entity is based on the text
 - attributes: Key facts mentioned about the entity as key-value pairs
 - confidence: Your confidence in this extraction (0.0-1.0)
 
-If no entities are found, return an empty array.
+For each relationship explicitly stated in the text between two extracted entities, identify:
+- source_name: The canonical name of the source entity (must match an extracted entity name)
+- target_name: The canonical name of the target entity (must match an extracted entity name)
+- relation_type: A concise lowercase snake_case verb phrase (e.g., "works_at", "manages", "persists_in", "depends_on", "hosted_by", "authored")
+- description: A short phrase describing the relationship in context
+- confidence: Your confidence in this relationship (0.0-1.0)
+
+If no entities or relationships are found, return empty arrays.
 
 Text:`
 
 // entityExtractionSchema defines the JSON schema for structured output.
-// This ensures the model returns valid, parseable JSON matching our ExtractedEntity type.
+// This ensures the model returns valid, parseable JSON matching our
+// ExtractedEntity and ExtractedRelationship types.
 //
 // The root MUST be an object: OpenAI-style structured output rejects array
 // roots at request time (before any response is generated), which would kill
@@ -37,7 +48,7 @@ Text:`
 // (optional fields expressed as nullable types).
 var entityExtractionSchema = &core.JSONSchemaDefinition{
 	Name:        "entity_extraction",
-	Description: "Array of extracted entities from text",
+	Description: "Extracted entities and typed directed relationships from text",
 	Strict:      true,
 	Schema: json.RawMessage(`{
 		"type": "object",
@@ -51,15 +62,19 @@ var entityExtractionSchema = &core.JSONSchemaDefinition{
 							"type": "string",
 							"description": "The canonical name of the entity"
 						},
-					"type": {
-						"type": "string",
-						"enum": ["person", "organization", "product", "location", "concept", "event", "other"],
-						"description": "The type of entity"
-					},
+						"type": {
+							"type": "string",
+							"enum": ["person", "organization", "product", "location", "concept", "event", "other"],
+							"description": "The type of entity"
+						},
 						"aliases": {
 							"type": ["array", "null"],
 							"items": {"type": "string"},
 							"description": "Alternative names or abbreviations"
+						},
+						"summary": {
+							"type": ["string", "null"],
+							"description": "Concise one-sentence summary of the entity"
 						},
 						"attributes": {
 							"type": ["object", "null"],
@@ -73,12 +88,44 @@ var entityExtractionSchema = &core.JSONSchemaDefinition{
 							"description": "Confidence score from 0.0 to 1.0"
 						}
 					},
-					"required": ["name", "type", "aliases", "attributes", "confidence"],
+					"required": ["name", "type", "aliases", "summary", "attributes", "confidence"],
+					"additionalProperties": false
+				}
+			},
+			"relationships": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"source_name": {
+							"type": "string",
+							"description": "Canonical name of the source entity"
+						},
+						"target_name": {
+							"type": "string",
+							"description": "Canonical name of the target entity"
+						},
+						"relation_type": {
+							"type": "string",
+							"description": "Concise lowercase snake_case relation verb phrase"
+						},
+						"description": {
+							"type": ["string", "null"],
+							"description": "Short contextual description of the relationship"
+						},
+						"confidence": {
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1,
+							"description": "Confidence score from 0.0 to 1.0"
+						}
+					},
+					"required": ["source_name", "target_name", "relation_type", "description", "confidence"],
 					"additionalProperties": false
 				}
 			}
 		},
-		"required": ["entities"],
+		"required": ["entities", "relationships"],
 		"additionalProperties": false
 	}`),
 }
@@ -123,12 +170,12 @@ func NewExtractor(cfg *config.Config) (*Extractor, error) {
 	return &Extractor{
 		client:    client,
 		model:     core.ModelID(cfg.Entity.ExtractionModel),
-		maxTokens: 2048, // Sufficient for entity extraction responses
+		maxTokens: 2048, // Sufficient for entity + relationship extraction responses
 		timeout:   cfg.Entity.ExtractionTimeout,
 	}, nil
 }
 
-// Extract extracts entities from the given text.
+// Extract extracts entities and typed relationships from the given text.
 // Uses structured output (JSON Schema) when supported by the provider for reliable parsing.
 func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult, error) {
 	if strings.TrimSpace(text) == "" {
@@ -161,10 +208,8 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 		return nil, fmt.Errorf("extraction completion failed: %w", err)
 	}
 
-	// Parse the structured JSON response. The schema wraps entities in an
-	// object root; fall back to legacy array parsing for providers that
-	// ignore the schema root.
-	entities, err := parseStructuredEntities(resp.Output)
+	// Parse structured JSON response containing entities and optional relationships.
+	entities, rawRels, err := parseExtractionPayload(resp.Output)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse extraction response: %w", err)
 	}
@@ -179,12 +224,19 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 		validEntities = append(validEntities, ent)
 	}
 
-	// Extract relationships from co-mentioned entities
-	relationships := extractRelationships(validEntities, text)
+	// Validate and normalize LLM-extracted relationships (no O(n^2) co-occurrence clique).
+	validRels := make([]ExtractedRelationship, 0, len(rawRels))
+	for _, rel := range rawRels {
+		if err := validateExtractedRelationship(&rel); err != nil {
+			continue
+		}
+		normalizeExtractedRelationship(&rel)
+		validRels = append(validRels, rel)
+	}
 
 	return &ExtractionResult{
 		Entities:      validEntities,
-		Relationships: relationships,
+		Relationships: validRels,
 		SourceText:    text,
 	}, nil
 }
@@ -194,7 +246,51 @@ func (e *Extractor) Extract(ctx context.Context, text string) (*ExtractionResult
 // and the raw array form ([...]) returned by providers that ignore the
 // schema root.
 func parseStructuredEntities(content string) ([]ExtractedEntity, error) {
-	return parseExtractionResponse(content)
+	entities, _, err := parseExtractionPayload(content)
+	return entities, err
+}
+
+// parseExtractionPayload parses both entities and typed relationships from the
+// LLM response, falling back cleanly when a provider returns a legacy entity
+// array or embeds JSON inside prose/markdown fences.
+func parseExtractionPayload(content string) ([]ExtractedEntity, []ExtractedRelationship, error) {
+	content = strings.TrimSpace(content)
+	content = stripMarkdownFence(content)
+
+	if entities, rels, err := tryParsePayload(content); err == nil {
+		return entities, rels, nil
+	}
+
+	for i := 0; i < len(content); i++ {
+		if content[i] != '[' && content[i] != '{' {
+			continue
+		}
+		end := scanBalanced(content, i)
+		if end < 0 {
+			continue
+		}
+		if entities, rels, err := tryParsePayload(content[i:end]); err == nil {
+			return entities, rels, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf("no valid JSON entities found in response")
+}
+
+func tryParsePayload(s string) ([]ExtractedEntity, []ExtractedRelationship, error) {
+	var wrapper struct {
+		Entities      []ExtractedEntity       `json:"entities"`
+		Relationships []ExtractedRelationship `json:"relationships"`
+	}
+	if err := json.Unmarshal([]byte(s), &wrapper); err == nil && wrapper.Entities != nil {
+		return wrapper.Entities, wrapper.Relationships, nil
+	}
+
+	entities, err := tryParseEntities(s)
+	if err != nil {
+		return nil, nil, err
+	}
+	return entities, nil, nil
 }
 
 // parseExtractionResponse parses the LLM response into extracted entities.
@@ -341,6 +437,8 @@ func normalizeExtractedEntity(ent *ExtractedEntity) {
 	}
 	ent.Aliases = normalizedAliases
 
+	ent.Summary = strings.TrimSpace(ent.Summary)
+
 	// Ensure confidence is in valid range
 	if ent.Confidence < 0 {
 		ent.Confidence = 0
@@ -354,6 +452,44 @@ func normalizeExtractedEntity(ent *ExtractedEntity) {
 	}
 }
 
+func validateExtractedRelationship(rel *ExtractedRelationship) error {
+	src := strings.TrimSpace(rel.SourceName)
+	tgt := strings.TrimSpace(rel.TargetName)
+	if src == "" || tgt == "" {
+		return fmt.Errorf("relationship endpoints cannot be empty")
+	}
+	if strings.EqualFold(src, tgt) {
+		return fmt.Errorf("self-referential relationship ignored")
+	}
+	if strings.TrimSpace(rel.RelationType) == "" {
+		return fmt.Errorf("relation_type cannot be empty")
+	}
+	return nil
+}
+
+func normalizeExtractedRelationship(rel *ExtractedRelationship) {
+	rel.SourceName = strings.TrimSpace(rel.SourceName)
+	rel.TargetName = strings.TrimSpace(rel.TargetName)
+	rel.Description = strings.TrimSpace(rel.Description)
+
+	rt := strings.ToLower(strings.TrimSpace(rel.RelationType))
+	rt = strings.ReplaceAll(rt, " ", "_")
+	rt = strings.ReplaceAll(rt, "-", "_")
+	for strings.Contains(rt, "__") {
+		rt = strings.ReplaceAll(rt, "__", "_")
+	}
+	rel.RelationType = strings.Trim(rt, "_")
+	if rel.RelationType == "" {
+		rel.RelationType = "related_to"
+	}
+
+	if rel.Confidence <= 0 {
+		rel.Confidence = 0.7
+	} else if rel.Confidence > 1 {
+		rel.Confidence = 1
+	}
+}
+
 // isValidEntityType checks if a type string is a valid entity type.
 // Uses the engine's ValidEntityTypes as the single source of truth.
 func isValidEntityType(t string) bool {
@@ -362,7 +498,8 @@ func isValidEntityType(t string) bool {
 }
 
 // extractRelationships creates relationships between co-mentioned entities.
-// Entities mentioned in the same text are assumed to be related.
+// Kept for backwards-compatible unit testing; Extract() now uses LLM-extracted
+// typed relationships directly instead of O(n^2) co-occurrence cliques.
 func extractRelationships(entities []ExtractedEntity, _ string) []ExtractedRelationship {
 	if len(entities) < 2 {
 		return nil

@@ -28,6 +28,7 @@ func goldenCases() map[string]any {
 		"conversation_summarize":       NewConversationSummarize(summarizeInput),
 		"knowledge_ingest":             NewKnowledgeIngest(ingestInput),
 		"knowledge_search":             NewKnowledgeSearch(knowledgeSearchInput),
+		"knowledge_search_graph":       NewKnowledgeSearch(knowledgeSearchGraphInput),
 		"knowledge_collections_list":   NewKnowledgeCollectionList(collectionListInput, ""),
 		"knowledge_collections_create": NewKnowledgeCollectionCreated(collectionFixture),
 		"knowledge_collections_delete": NewKnowledgeCollectionDeleted(),

@@ -3,6 +3,9 @@ package conversation
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -876,6 +879,240 @@ func TestAutoSummarization(t *testing.T) {
 			t.Errorf("expected summarizer to not be called when SkipAutoSummarize=true, got %d calls", summarizer.callCount)
 		}
 	})
+
+	t.Run("does not loop on repeated History calls or below-threshold appends", func(t *testing.T) {
+		engine, backend := setupTestEngine(t, false)
+		engine.cfg.AutoSummarizeThreshold = 10
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-no-loop"
+
+		sameSec := time.Now().UTC().Truncate(time.Second)
+		for i := 0; i < 15; i++ {
+			msg := &types.Message{
+				ID:        fmt.Sprintf("msg-loop-%02d", i),
+				Namespace: namespace,
+				ThreadID:  threadID,
+				Role:      "user",
+				Content:   fmt.Sprintf("Message %d", i),
+				CreatedAt: sameSec,
+			}
+			if err := backend.AppendMessage(ctx, msg); err != nil {
+				t.Fatalf("failed to append: %v", err)
+			}
+		}
+
+		summarizer := NewMockSummarizer("First summary")
+		engine.SetSummarizer(summarizer)
+
+		// First History call triggers summarization once.
+		res1, err := engine.History(ctx, namespace, threadID, &HistoryOpts{IncludeSummary: true})
+		if err != nil {
+			t.Fatalf("first History failed: %v", err)
+		}
+		if summarizer.callCount != 1 {
+			t.Fatalf("expected 1 summarizer call after first History, got %d", summarizer.callCount)
+		}
+		if res1.Summary != "First summary" {
+			t.Errorf("expected summary 'First summary', got %q", res1.Summary)
+		}
+		if len(res1.Messages) != 10 {
+			t.Errorf("expected 10 unsummarized messages with IncludeSummary=true, got %d", len(res1.Messages))
+		}
+
+		// ShouldSummarize must now be false.
+		should, err := engine.ShouldSummarize(ctx, namespace, threadID)
+		if err != nil {
+			t.Fatalf("ShouldSummarize failed: %v", err)
+		}
+		if should {
+			t.Error("expected ShouldSummarize to be false immediately after auto-summarization")
+		}
+
+		// Second History call must NOT invoke the summarizer again.
+		res2, err := engine.History(ctx, namespace, threadID, &HistoryOpts{IncludeSummary: true})
+		if err != nil {
+			t.Fatalf("second History failed: %v", err)
+		}
+		if summarizer.callCount != 1 {
+			t.Fatalf("expected summarizer to still be called once after second History, got %d", summarizer.callCount)
+		}
+		if len(res2.Messages) != 10 {
+			t.Errorf("expected 10 unsummarized messages on second History, got %d", len(res2.Messages))
+		}
+
+		// Lower threshold scenario: set threshold to 15, append 3 more messages (13 unsummarized <= 15).
+		engine.cfg.AutoSummarizeThreshold = 15
+		for i := 0; i < 3; i++ {
+			if _, err := engine.Append(ctx, namespace, threadID, "user", fmt.Sprintf("Extra %d", i), nil); err != nil {
+				t.Fatalf("Append failed: %v", err)
+			}
+		}
+		if _, err := engine.History(ctx, namespace, threadID, &HistoryOpts{IncludeSummary: true}); err != nil {
+			t.Fatalf("third History failed: %v", err)
+		}
+		if summarizer.callCount != 1 {
+			t.Fatalf("expected no re-summarization while unsummarized count (13) <= threshold (15), got %d calls", summarizer.callCount)
+		}
+
+		// Append 3 more messages (16 unsummarized > 15) -> should trigger exactly once more,
+		// and should pass only unsummarized messages plus previous summary.
+		for i := 3; i < 6; i++ {
+			if _, err := engine.Append(ctx, namespace, threadID, "user", fmt.Sprintf("Extra %d", i), nil); err != nil {
+				t.Fatalf("Append failed: %v", err)
+			}
+		}
+		if _, err := engine.History(ctx, namespace, threadID, &HistoryOpts{IncludeSummary: true}); err != nil {
+			t.Fatalf("fourth History failed: %v", err)
+		}
+		if summarizer.callCount != 2 {
+			t.Fatalf("expected second summarization once unsummarized exceeded threshold, got %d calls", summarizer.callCount)
+		}
+		// 16 unsummarized - 10 kept = 6 newly summarized + 1 previous summary system message = 7.
+		if len(summarizer.messages) != 7 {
+			t.Errorf("expected 7 messages passed to summarizer (1 previous summary + 6 unsummarized), got %d", len(summarizer.messages))
+		}
+	})
+
+	t.Run("same-second messages keep exact KeepRecent unsummarized", func(t *testing.T) {
+		engine, backend := setupTestEngine(t, false)
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-same-second"
+
+		sameSec := time.Now().UTC().Truncate(time.Second)
+		for i := 0; i < 12; i++ {
+			msg := &types.Message{
+				ID:        fmt.Sprintf("same-%02d", i),
+				Namespace: namespace,
+				ThreadID:  threadID,
+				Role:      "user",
+				Content:   fmt.Sprintf("Message %d", i),
+				CreatedAt: sameSec,
+			}
+			if err := backend.AppendMessage(ctx, msg); err != nil {
+				t.Fatalf("AppendMessage: %v", err)
+			}
+		}
+
+		engine.SetSummarizer(NewMockSummarizer("Same-second summary"))
+		result, err := engine.Summarize(ctx, namespace, threadID, &SummarizeOpts{KeepRecent: 4})
+		if err != nil {
+			t.Fatalf("Summarize failed: %v", err)
+		}
+		if result.MessagesSummarized != 8 || result.MessagesKept != 4 {
+			t.Fatalf("expected 8 summarized and 4 kept, got %d summarized and %d kept", result.MessagesSummarized, result.MessagesKept)
+		}
+
+		unsummarized, _, err := backend.GetUnsummarizedMessages(ctx, namespace, threadID, 0, "")
+		if err != nil {
+			t.Fatalf("GetUnsummarizedMessages: %v", err)
+		}
+		if len(unsummarized) != 4 {
+			t.Fatalf("expected exactly 4 unsummarized messages, got %d", len(unsummarized))
+		}
+		// Ensure the kept messages are the 4 most recently inserted messages.
+		for i, msg := range unsummarized {
+			wantID := fmt.Sprintf("same-%02d", 8+i)
+			if msg.ID != wantID {
+				t.Errorf("unsummarized[%d]: want ID %s, got %s", i, wantID, msg.ID)
+			}
+		}
+	})
+
+	t.Run("concurrent History calls trigger summarizer only once", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Storage.DataDir = t.TempDir()
+		cfg.Conversation.AutoSummarizeThreshold = 10
+		cfg.Conversation.SemanticSearchEnabled = false
+
+		backend, err := sqlite.New(cfg)
+		if err != nil {
+			t.Fatalf("sqlite.New: %v", err)
+		}
+		defer backend.Close()
+		if err := backend.Migrate(context.Background()); err != nil {
+			t.Fatalf("Migrate: %v", err)
+		}
+
+		engine, err := NewEngine(backend, nil, &cfg.Conversation)
+		if err != nil {
+			t.Fatalf("NewEngine: %v", err)
+		}
+
+		ctx := context.Background()
+		namespace := "test-ns"
+		threadID := "thread-concurrent"
+
+		sameSec := time.Now().UTC().Truncate(time.Second)
+		for i := 0; i < 15; i++ {
+			msg := &types.Message{
+				ID:        fmt.Sprintf("conc-%02d", i),
+				Namespace: namespace,
+				ThreadID:  threadID,
+				Role:      "user",
+				Content:   fmt.Sprintf("Concurrent message %d", i),
+				CreatedAt: sameSec,
+			}
+			if err := backend.AppendMessage(ctx, msg); err != nil {
+				t.Fatalf("AppendMessage: %v", err)
+			}
+		}
+
+		slowSumm := &concurrentMockSummarizer{
+			summary: "Concurrent summary",
+			delay:   30 * time.Millisecond,
+		}
+		engine.SetSummarizer(slowSumm)
+
+		const goroutines = 8
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make(chan error, goroutines)
+
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				res, err := engine.History(ctx, namespace, threadID, &HistoryOpts{IncludeSummary: true})
+				if err != nil {
+					errs <- err
+					return
+				}
+				if res.Summary != "Concurrent summary" {
+					errs <- fmt.Errorf("expected summary 'Concurrent summary', got %q", res.Summary)
+				}
+			}()
+		}
+
+		close(start)
+		wg.Wait()
+		close(errs)
+
+		for err := range errs {
+			t.Errorf("concurrent History error: %v", err)
+		}
+
+		if got := slowSumm.calls.Load(); got != 1 {
+			t.Fatalf("expected summarizer to be invoked once across %d concurrent History calls, got %d", goroutines, got)
+		}
+	})
+}
+
+type concurrentMockSummarizer struct {
+	summary string
+	delay   time.Duration
+	calls   atomic.Int64
+}
+
+func (m *concurrentMockSummarizer) SummarizeMessages(ctx context.Context, messages []*types.Message) (string, error) {
+	m.calls.Add(1)
+	if m.delay > 0 {
+		time.Sleep(m.delay)
+	}
+	return m.summary, nil
 }
 
 func TestShouldSummarize(t *testing.T) {

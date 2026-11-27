@@ -53,6 +53,11 @@ type ConversationStorage interface {
 	// limit specifies the maximum number of messages to return (most recent first).
 	GetMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error)
 
+	// GetUnsummarizedMessages retrieves unsummarized messages from a thread in chronological order.
+	// If limit > 0, returns up to the most recent limit unsummarized messages (with cursor pagination).
+	// If limit <= 0, returns all unsummarized messages.
+	GetUnsummarizedMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error)
+
 	// SearchMessages performs semantic search across messages in a namespace.
 	SearchMessages(ctx context.Context, namespace string, embedding []float32, opts MessageSearchOpts) ([]*types.MessageResult, error)
 
@@ -73,6 +78,9 @@ type ConversationStorage interface {
 
 	// MarkMessagesSummarized marks messages as having been included in a summary.
 	MarkMessagesSummarized(ctx context.Context, namespace, threadID string, beforeTime int64) error
+
+	// MarkMessagesSummarizedByIDs marks the specified message IDs as having been included in a summary.
+	MarkMessagesSummarizedByIDs(ctx context.Context, namespace, threadID string, messageIDs []string) error
 }
 
 // MessageSearchOpts configures message search behavior.

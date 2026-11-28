@@ -3,7 +3,7 @@ package dto
 import (
 	"time"
 
-	ctxengine "github.com/petal-labs/cortex/internal/context"
+	ctxengine "github.com/petal-labs/cortex/v2/internal/context"
 )
 
 // ContextGet is the context_get response.

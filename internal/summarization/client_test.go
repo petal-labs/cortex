@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func TestFormatMessages(t *testing.T) {

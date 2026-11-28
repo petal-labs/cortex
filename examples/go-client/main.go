@@ -1,7 +1,7 @@
 // Example: Using Cortex as a Go library via the public pkg/cortex SDK.
 //
 // This example demonstrates how external Go applications can embed Cortex
-// using only github.com/petal-labs/cortex/pkg/cortex and pkg/types
+// using only github.com/petal-labs/cortex/v2/pkg/cortex and pkg/types
 // (with zero internal/ imports).
 //
 // Run with: go run -tags sqlite_fts5 ./examples/go-client
@@ -14,8 +14,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/petal-labs/cortex/pkg/cortex"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/cortex"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func main() {

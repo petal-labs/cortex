@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/internal/entity"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/embedding"
+	"github.com/petal-labs/cortex/v2/internal/entity"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 var entityCmd = &cobra.Command{

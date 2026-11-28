@@ -1,7 +1,7 @@
 // Example: Conversational voice agent backed by Iris v2 + Cortex Voice Memory.
 //
 // Demonstrates the end-to-end voice memory loop using only public packages
-// (github.com/petal-labs/cortex/pkg/cortex, pkg/types, and
+// (github.com/petal-labs/cortex/v2/pkg/cortex, pkg/types, and
 // github.com/petal-labs/iris/v2/{core,voice}):
 //  1. Opt-in voice transcript storage with namespace enforcement
 //  2. Iris voice.Pipeline streaming STT -> LLM -> streaming TTS
@@ -28,8 +28,8 @@ import (
 	"github.com/petal-labs/iris/v2/core"
 	"github.com/petal-labs/iris/v2/voice"
 
-	"github.com/petal-labs/cortex/pkg/cortex"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/cortex"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func main() {

@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/gc"
-	"github.com/petal-labs/cortex/internal/observability"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/gc"
+	"github.com/petal-labs/cortex/v2/internal/observability"
 )
 
 var (

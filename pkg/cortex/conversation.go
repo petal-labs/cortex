@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // ConversationClient provides typed access to Cortex Conversation Memory.

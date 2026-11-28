@@ -16,7 +16,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/petal-labs/cortex/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/storage"
 )
 
 // RunSuite runs the full dual-backend conformance suite against b. Each domain

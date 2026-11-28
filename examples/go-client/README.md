@@ -13,7 +13,7 @@ While Cortex is primarily designed as an MCP server, you can also use its engine
 ## Installation
 
 ```bash
-go get github.com/petal-labs/cortex
+go get github.com/petal-labs/cortex/v2
 ```
 
 ## Example: Simple Knowledge Store

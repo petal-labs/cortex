@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/petal-labs/cortex/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/config"
 )
 
 // MockProvider is a test implementation of Provider.

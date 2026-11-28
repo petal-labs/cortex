@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/storage/sqlite"
 )
 
 // TestSQLite25KBenchmark populates a real file-backed SQLite WAL database at

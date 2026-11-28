@@ -7,7 +7,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/petal-labs/cortex/internal/storage/conformance"
+	"github.com/petal-labs/cortex/v2/internal/storage/conformance"
 )
 
 // TestConformance runs the dual-backend conformance suite against an

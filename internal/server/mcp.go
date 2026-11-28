@@ -16,15 +16,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 
-	ctxengine "github.com/petal-labs/cortex/internal/context"
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/internal/entity"
-	"github.com/petal-labs/cortex/internal/knowledge"
-	"github.com/petal-labs/cortex/internal/observability"
-	"github.com/petal-labs/cortex/internal/server/dto"
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/pkg/types"
+	ctxengine "github.com/petal-labs/cortex/v2/internal/context"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/internal/embedding"
+	"github.com/petal-labs/cortex/v2/internal/entity"
+	"github.com/petal-labs/cortex/v2/internal/knowledge"
+	"github.com/petal-labs/cortex/v2/internal/observability"
+	"github.com/petal-labs/cortex/v2/internal/server/dto"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // DefaultSSEAddr is the default loopback listen address for MCP SSE transport.

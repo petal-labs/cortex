@@ -8,8 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/petal-labs/cortex/internal/entity"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/entity"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // EntityModel handles the entities view

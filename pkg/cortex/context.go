@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	ctxengine "github.com/petal-labs/cortex/internal/context"
-	"github.com/petal-labs/cortex/pkg/types"
+	ctxengine "github.com/petal-labs/cortex/v2/internal/context"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // ContextClient provides typed access to Cortex Workflow Context.

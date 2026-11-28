@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petal-labs/cortex/pkg/cortex"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/cortex"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // deterministicEmbedder implements cortex.EmbeddingProvider for external SDK tests.

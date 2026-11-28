@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/petal-labs/cortex/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/storage"
 )
 
 var namespaceCmd = &cobra.Command{

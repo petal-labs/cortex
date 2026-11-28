@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/petal-labs/cortex/internal/llm"
+	"github.com/petal-labs/cortex/v2/internal/llm"
 )
 
 // validateProvider checks one provider setting: that it is set, that it

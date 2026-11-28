@@ -8,7 +8,7 @@ import (
 
 	"github.com/petal-labs/iris/v2/core"
 
-	"github.com/petal-labs/cortex/internal/llm"
+	"github.com/petal-labs/cortex/v2/internal/llm"
 )
 
 // blockingChatProvider hangs on every Chat call until its context is

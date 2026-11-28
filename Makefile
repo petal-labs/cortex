@@ -54,7 +54,7 @@ lint: ## Run golangci-lint
 
 fmt: ## Format code
 	gofmt -s -w .
-	goimports -w -local github.com/petal-labs/cortex .
+	goimports -w -local github.com/petal-labs/cortex/v2 .
 
 vet: ## Run go vet
 	go vet -tags $(GO_TAGS) ./...

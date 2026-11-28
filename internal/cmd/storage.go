@@ -3,10 +3,10 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/internal/storage/pgvector"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/storage/pgvector"
+	"github.com/petal-labs/cortex/v2/internal/storage/sqlite"
 )
 
 // createStorage creates a storage backend based on configuration.

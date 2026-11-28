@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func TestChunkerFixedStrategy(t *testing.T) {

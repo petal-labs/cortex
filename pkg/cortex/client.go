@@ -29,6 +29,7 @@ type Client struct {
 	shutdownTimeout time.Duration
 
 	conversation *ConversationClient
+	voice        *VoiceClient
 	knowledge    *KnowledgeClient
 	context      *ContextClient
 	entity       *EntityClient
@@ -128,6 +129,18 @@ func Open(ctx context.Context, opts ...Option) (*Client, error) {
 			cfg.Entity.ExtractionMode = oc.extractionMode
 		}
 	}
+	if oc.voiceTranscriptStorageSet {
+		cfg.Voice.TranscriptStorageEnabled = oc.voiceTranscriptStorageEnabled
+	}
+	if oc.voiceTranscriptRetentionDays != nil {
+		if *oc.voiceTranscriptRetentionDays < 0 {
+			return nil, fmt.Errorf("voice transcript retention days must be >= 0: %w", ErrInvalidInput)
+		}
+		cfg.Voice.TranscriptRetentionDays = *oc.voiceTranscriptRetentionDays
+	}
+	if oc.allowedNamespacesSet {
+		cfg.Namespace.AllowedNamespaces = oc.allowedNamespaces
+	}
 
 	// Initialize storage backend
 	var store storage.Backend
@@ -197,6 +210,8 @@ func Open(ctx context.Context, opts ...Option) (*Client, error) {
 		cleanupOnErr()
 		return nil, fmt.Errorf("create conversation engine: %w", err)
 	}
+	convEng.SetVoiceConfig(&cfg.Voice)
+	convEng.SetAllowedNamespaces(cfg.Namespace.AllowedNamespaces)
 
 	switch {
 	case oc.summarizer != nil:
@@ -265,6 +280,7 @@ func Open(ctx context.Context, opts ...Option) (*Client, error) {
 		queueProcessor:  queueProcessor,
 		shutdownTimeout: oc.shutdownTimeout,
 		conversation:    &ConversationClient{engine: convEng},
+		voice:           &VoiceClient{engine: convEng},
 		knowledge:       &KnowledgeClient{engine: knowEng},
 		context:         &ContextClient{engine: ctxEng},
 		entity:          &EntityClient{engine: entEng},
@@ -279,6 +295,12 @@ func New(ctx context.Context, opts ...Option) (*Client, error) {
 // Conversation returns the Conversation Memory sub-client.
 func (c *Client) Conversation() *ConversationClient {
 	return c.conversation
+}
+
+// Voice returns the Voice Memory sub-client for committed voice transcripts,
+// correlation metadata, Iris context injection, and retention controls.
+func (c *Client) Voice() *VoiceClient {
+	return c.voice
 }
 
 // Knowledge returns the Knowledge Store sub-client.

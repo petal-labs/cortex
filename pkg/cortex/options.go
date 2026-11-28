@@ -12,10 +12,14 @@ import (
 
 // Common sentinel errors returned by the Cortex SDK.
 var (
-	ErrNotFound        = errors.New("not found")
-	ErrAlreadyExists   = errors.New("already exists")
-	ErrVersionConflict = errors.New("version conflict")
-	ErrInvalidInput    = errors.New("invalid input")
+	ErrNotFound              = errors.New("not found")
+	ErrAlreadyExists         = errors.New("already exists")
+	ErrVersionConflict       = errors.New("version conflict")
+	ErrInvalidInput          = errors.New("invalid input")
+	ErrVoiceStorageDisabled  = errors.New("voice transcript storage is disabled")
+	ErrUncommittedTranscript = errors.New("uncommitted partial transcript cannot be persisted")
+	ErrRawAudioDisallowed    = errors.New("raw audio persistence is disabled")
+	ErrNamespaceNotAllowed   = errors.New("namespace not allowed")
 )
 
 // SearchMode defines the retrieval strategy for search operations.
@@ -80,6 +84,12 @@ type openConfig struct {
 	defaultHistoryLimit    *int
 	defaultChunkConfig     *types.ChunkConfig
 	shutdownTimeout        time.Duration
+
+	voiceTranscriptStorageSet     bool
+	voiceTranscriptStorageEnabled bool
+	voiceTranscriptRetentionDays  *int
+	allowedNamespacesSet          bool
+	allowedNamespaces             []string
 }
 
 // Option configures a Cortex Client created via Open or New.
@@ -204,5 +214,32 @@ func WithDefaultChunkConfig(cfg types.ChunkConfig) Option {
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(c *openConfig) {
 		c.shutdownTimeout = d
+	}
+}
+
+// WithVoiceTranscriptStorage explicitly enables or disables opt-in persistence
+// of committed voice transcripts. Voice transcript storage is disabled by
+// default for privacy.
+func WithVoiceTranscriptStorage(enabled bool) Option {
+	return func(c *openConfig) {
+		c.voiceTranscriptStorageSet = true
+		c.voiceTranscriptStorageEnabled = enabled
+	}
+}
+
+// WithVoiceTranscriptRetention sets the voice-specific transcript retention
+// window in days (0 disables voice-specific automatic deletion).
+func WithVoiceTranscriptRetention(days int) Option {
+	return func(c *openConfig) {
+		c.voiceTranscriptRetentionDays = &days
+	}
+}
+
+// WithAllowedNamespaces restricts voice memory operations to the provided
+// namespace allowlist. Passing no namespaces allows all non-empty namespaces.
+func WithAllowedNamespaces(namespaces ...string) Option {
+	return func(c *openConfig) {
+		c.allowedNamespacesSet = true
+		c.allowedNamespaces = append([]string(nil), namespaces...)
 	}
 }

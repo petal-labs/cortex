@@ -18,6 +18,7 @@ type Config struct {
 	Context       ContextConfig       `mapstructure:"context"`
 	Entity        EntityConfig        `mapstructure:"entity"`
 	Retention     RetentionConfig     `mapstructure:"retention"`
+	Voice         VoiceConfig         `mapstructure:"voice"`
 	Namespace     NamespaceConfig     `mapstructure:"namespace"`
 	Server        ServerConfig        `mapstructure:"server"`
 }
@@ -101,6 +102,17 @@ type RetentionConfig struct {
 	GCInterval                time.Duration `mapstructure:"gc_interval"`
 }
 
+// VoiceConfig configures privacy, opt-in persistence, and retention for voice transcripts.
+type VoiceConfig struct {
+	// TranscriptStorageEnabled controls whether committed voice transcripts may be
+	// persisted in conversation memory. Default is false (explicit opt-in).
+	TranscriptStorageEnabled bool `mapstructure:"transcript_storage_enabled"`
+
+	// TranscriptRetentionDays controls automatic garbage collection of persisted
+	// voice transcripts in days. 0 disables voice-specific auto-deletion.
+	TranscriptRetentionDays int `mapstructure:"transcript_retention_days"`
+}
+
 // NamespaceConfig configures namespace isolation.
 type NamespaceConfig struct {
 	AllowedNamespaces []string `mapstructure:"allowed_namespaces"`
@@ -178,6 +190,10 @@ func DefaultConfig() *Config {
 			EntityStaleDays:           0, // 0 = no auto-prune
 			ContextRunRetentionDays:   30,
 			GCInterval:                24 * time.Hour,
+		},
+		Voice: VoiceConfig{
+			TranscriptStorageEnabled: false, // Explicit opt-in by default
+			TranscriptRetentionDays:  0,     // 0 = no voice-specific auto-delete
 		},
 		Namespace: NamespaceConfig{
 			AllowedNamespaces: []string{}, // Empty = allow all
@@ -288,6 +304,8 @@ func setViperDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("retention.entity_stale_days", cfg.Retention.EntityStaleDays)
 	v.SetDefault("retention.context_run_retention_days", cfg.Retention.ContextRunRetentionDays)
 	v.SetDefault("retention.gc_interval", cfg.Retention.GCInterval)
+	v.SetDefault("voice.transcript_storage_enabled", cfg.Voice.TranscriptStorageEnabled)
+	v.SetDefault("voice.transcript_retention_days", cfg.Voice.TranscriptRetentionDays)
 	v.SetDefault("namespace.allowed_namespaces", cfg.Namespace.AllowedNamespaces)
 	v.SetDefault("server.host", cfg.Server.Host)
 	v.SetDefault("server.log_level", cfg.Server.LogLevel)

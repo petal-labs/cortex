@@ -152,6 +152,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create conversation engine: %w", err)
 	}
+	convEngine.SetVoiceConfig(&cfg.Voice)
+	convEngine.SetAllowedNamespaces(cfg.Namespace.AllowedNamespaces)
 
 	// Set up summarization if provider is configured
 	if cfg.Summarization.Provider != "" && cfg.Summarization.Model != "" {

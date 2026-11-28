@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -58,6 +59,83 @@ func (b *Backend) DeleteOldConversations(ctx context.Context, olderThan time.Dur
 	}
 
 	deleted, _ := result.RowsAffected()
+	return deleted, nil
+}
+
+// DeleteOldVoiceTranscripts removes voice transcript messages (carrying
+// voice.session_id in metadata) older than olderThan, along with their
+// embeddings and any threads left empty.
+func (b *Backend) DeleteOldVoiceTranscripts(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan).Unix()
+
+	var deleted int64
+	err := b.withTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT id, namespace, thread_id
+			FROM messages
+			WHERE metadata IS NOT NULL
+			  AND json_valid(metadata)
+			  AND json_extract(metadata, '$."voice.session_id"') IS NOT NULL
+			  AND created_at < ?
+		`, cutoff)
+		if err != nil {
+			return err
+		}
+
+		type threadKey struct {
+			namespace string
+			threadID  string
+		}
+		var msgIDs []string
+		threads := make(map[threadKey]struct{})
+		for rows.Next() {
+			var id, ns, tid string
+			if err := rows.Scan(&id, &ns, &tid); err != nil {
+				rows.Close()
+				return err
+			}
+			msgIDs = append(msgIDs, id)
+			threads[threadKey{namespace: ns, threadID: tid}] = struct{}{}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(msgIDs) == 0 {
+			return nil
+		}
+
+		for _, id := range msgIDs {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM message_embeddings WHERE message_id = ?", id); err != nil {
+				return err
+			}
+			res, err := tx.ExecContext(ctx, "DELETE FROM messages WHERE id = ?", id)
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			deleted += n
+		}
+
+		// Clean up any threads left completely empty after transcript deletion.
+		for tk := range threads {
+			_, err := tx.ExecContext(ctx, `
+				DELETE FROM threads
+				WHERE namespace = ? AND id = ?
+				  AND NOT EXISTS (
+				      SELECT 1 FROM messages WHERE namespace = ? AND thread_id = ?
+				  )
+			`, tk.namespace, tk.threadID, tk.namespace, tk.threadID)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
 	return deleted, nil
 }
 

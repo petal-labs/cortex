@@ -84,6 +84,7 @@ func TestNilResultMappersEmitEmptyCollections(t *testing.T) {
 	cases := map[string]func() any{
 		"conversation_history":  func() any { return NewConversationHistory(nil) },
 		"conversation_search":   func() any { return NewConversationSearch(nil) },
+		"voice_history":         func() any { return NewVoiceHistory(nil) },
 		"context_history":       func() any { return NewContextHistory(nil) },
 		"context_list":          func() any { return NewContextList(nil) },
 		"knowledge_search":      func() any { return NewKnowledgeSearch(nil) },

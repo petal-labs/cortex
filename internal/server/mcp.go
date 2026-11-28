@@ -94,6 +94,7 @@ func New(
 
 	// Register all tools
 	s.registerConversationTools()
+	s.registerVoiceTools()
 	s.registerKnowledgeTools()
 	s.registerContextTools()
 	s.registerEntityTools()
@@ -800,6 +801,14 @@ var clientErrors = []error{
 	conversation.ErrThreadNotFound,
 	conversation.ErrNothingToSummarize,
 	conversation.ErrSummarizerNotSet,
+	conversation.ErrVoiceStorageDisabled,
+	conversation.ErrInvalidNamespace,
+	conversation.ErrNamespaceNotAllowed,
+	conversation.ErrInvalidSessionID,
+	conversation.ErrInvalidRetentionDuration,
+	types.ErrInvalidVoiceMetadata,
+	types.ErrUncommittedTranscript,
+	types.ErrRawAudioDisallowed,
 	knowledge.ErrEmptyContent,
 	knowledge.ErrCollectionNotFound,
 	knowledge.ErrDocumentNotFound,

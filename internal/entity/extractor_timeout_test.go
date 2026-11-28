@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petal-labs/iris/core"
+	"github.com/petal-labs/iris/v2/core"
 
 	"github.com/petal-labs/cortex/internal/llm"
 )
@@ -15,9 +15,16 @@ import (
 // canceled, so tests can assert timeout wiring in the extraction path.
 type blockingChatProvider struct{}
 
-func (p *blockingChatProvider) ID() string                 { return "blocking" }
-func (p *blockingChatProvider) Models() []core.ModelInfo   { return nil }
-func (p *blockingChatProvider) Supports(core.Feature) bool { return false }
+func (p *blockingChatProvider) ID() string { return "blocking" }
+func (p *blockingChatProvider) Models() []core.ModelInfo {
+	return []core.ModelInfo{{
+		ID:           "test-model",
+		Capabilities: []core.Feature{core.FeatureChat, core.FeatureStructuredOutput},
+	}}
+}
+func (p *blockingChatProvider) Supports(f core.Feature) bool {
+	return f == core.FeatureChat || f == core.FeatureStructuredOutput
+}
 func (p *blockingChatProvider) StreamChat(ctx context.Context, _ *core.ChatRequest) (*core.ChatStream, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()

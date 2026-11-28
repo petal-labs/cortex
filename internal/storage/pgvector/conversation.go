@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +84,15 @@ func (b *Backend) AppendMessage(ctx context.Context, msg *types.Message) error {
 	return tx.Commit(ctx)
 }
 
+// parsePGMessageCursor parses either a composite "<rfc3339nano>|<id>" cursor
+// or a legacy "<rfc3339nano>" cursor.
+func parsePGMessageCursor(cursor string) (string, string, bool) {
+	if idx := strings.IndexByte(cursor, '|'); idx > 0 && idx < len(cursor)-1 {
+		return cursor[:idx], cursor[idx+1:], true
+	}
+	return cursor, "", false
+}
+
 // GetMessages retrieves messages from a thread, ordered by creation time.
 func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error) {
 	if limit <= 0 {
@@ -98,14 +108,21 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 	args = append(args, namespace, threadID)
 	argNum := 3
 
-	// Handle cursor-based pagination (cursor is the created_at timestamp)
+	// Handle cursor-based pagination (composite "<rfc3339nano>|<id>" or legacy timestamp)
 	if cursor != "" {
-		query += fmt.Sprintf(" AND created_at < $%d", argNum)
-		args = append(args, cursor)
-		argNum++
+		ts, id, composite := parsePGMessageCursor(cursor)
+		if composite {
+			query += fmt.Sprintf(" AND (created_at < $%d OR (created_at = $%d AND id < $%d))", argNum, argNum, argNum+1)
+			args = append(args, ts, id)
+			argNum += 2
+		} else {
+			query += fmt.Sprintf(" AND created_at < $%d", argNum)
+			args = append(args, ts)
+			argNum++
+		}
 	}
 
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", argNum)
+	query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", argNum)
 	args = append(args, limit+1) // Fetch one extra to determine if there are more
 
 	rows, err := b.pool.Query(ctx, query, args...)
@@ -141,7 +158,8 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 	if len(messages) > limit {
 		messages = messages[:limit]
 		if len(messages) > 0 {
-			nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339Nano)
+			oldest := messages[len(messages)-1]
+			nextCursor = oldest.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + oldest.ID
 		}
 	}
 
@@ -167,16 +185,23 @@ func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, thread
 	argNum := 3
 
 	if cursor != "" {
-		query += fmt.Sprintf(" AND created_at < $%d", argNum)
-		args = append(args, cursor)
-		argNum++
+		ts, id, composite := parsePGMessageCursor(cursor)
+		if composite {
+			query += fmt.Sprintf(" AND (created_at < $%d OR (created_at = $%d AND id < $%d))", argNum, argNum, argNum+1)
+			args = append(args, ts, id)
+			argNum += 2
+		} else {
+			query += fmt.Sprintf(" AND created_at < $%d", argNum)
+			args = append(args, ts)
+			argNum++
+		}
 	}
 
 	if limit > 0 {
-		query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", argNum)
+		query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", argNum)
 		args = append(args, limit+1)
 	} else {
-		query += " ORDER BY created_at ASC"
+		query += " ORDER BY created_at ASC, id ASC"
 	}
 
 	rows, err := b.pool.Query(ctx, query, args...)
@@ -212,7 +237,8 @@ func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, thread
 		if len(messages) > limit {
 			messages = messages[:limit]
 			if len(messages) > 0 {
-				nextCursor = messages[len(messages)-1].CreatedAt.Format(time.RFC3339Nano)
+				oldest := messages[len(messages)-1]
+				nextCursor = oldest.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + oldest.ID
 			}
 		}
 		// Reverse to get chronological order (oldest first)
@@ -500,4 +526,74 @@ func (b *Backend) SearchMessages(ctx context.Context, namespace string, embeddin
 	}
 
 	return results, nil
+}
+
+// DeleteVoiceSession removes all voice transcript messages belonging to
+// sessionID strictly within namespace, along with their embeddings and any
+// threads left empty.
+func (b *Backend) DeleteVoiceSession(ctx context.Context, namespace, sessionID string) (int64, error) {
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(sessionID) == "" {
+		return 0, storage.ErrInvalidInput
+	}
+
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, thread_id
+		FROM messages
+		WHERE namespace = $1
+		  AND metadata IS NOT NULL
+		  AND metadata->>'voice.session_id' = $2
+	`, namespace, sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query voice session messages: %w", err)
+	}
+
+	var msgIDs []string
+	affectedThreads := make(map[string]struct{})
+	for rows.Next() {
+		var id, tid string
+		if err := rows.Scan(&id, &tid); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("failed to scan voice session message: %w", err)
+		}
+		msgIDs = append(msgIDs, id)
+		affectedThreads[tid] = struct{}{}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed to iterate voice session messages: %w", err)
+	}
+	if len(msgIDs) == 0 {
+		return 0, nil
+	}
+
+	if _, err := tx.Exec(ctx, "DELETE FROM message_embeddings WHERE message_id = ANY($1)", msgIDs); err != nil {
+		return 0, fmt.Errorf("failed to delete voice message embeddings: %w", err)
+	}
+	res, err := tx.Exec(ctx, "DELETE FROM messages WHERE namespace = $1 AND id = ANY($2)", namespace, msgIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete voice messages: %w", err)
+	}
+
+	for tid := range affectedThreads {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM threads
+			WHERE namespace = $1 AND id = $2
+			  AND NOT EXISTS (
+			      SELECT 1 FROM messages WHERE namespace = $1 AND thread_id = $2
+			  )
+		`, namespace, tid); err != nil {
+			return 0, fmt.Errorf("failed to cleanup empty voice thread: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("failed to commit voice session deletion: %w", err)
+	}
+	return res.RowsAffected(), nil
 }

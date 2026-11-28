@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/petal-labs/iris/core"
-	"github.com/petal-labs/iris/providers/anthropic"
-	"github.com/petal-labs/iris/providers/gemini"
-	"github.com/petal-labs/iris/providers/ollama"
-	"github.com/petal-labs/iris/providers/openai"
-	"github.com/petal-labs/iris/providers/voyageai"
+	"github.com/petal-labs/iris/v2/core"
+	"github.com/petal-labs/iris/v2/providers/anthropic"
+	"github.com/petal-labs/iris/v2/providers/gemini"
+	"github.com/petal-labs/iris/v2/providers/ollama"
+	"github.com/petal-labs/iris/v2/providers/openai"
+	"github.com/petal-labs/iris/v2/providers/voyageai"
 )
 
 // EmbeddingProvider is an alias for core.EmbeddingProvider.

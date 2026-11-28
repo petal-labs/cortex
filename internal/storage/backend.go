@@ -81,6 +81,11 @@ type ConversationStorage interface {
 
 	// MarkMessagesSummarizedByIDs marks the specified message IDs as having been included in a summary.
 	MarkMessagesSummarizedByIDs(ctx context.Context, namespace, threadID string, messageIDs []string) error
+
+	// DeleteVoiceSession removes all voice transcript messages belonging to sessionID
+	// within namespace (along with their embeddings and any threads left empty).
+	// Returns the number of messages deleted.
+	DeleteVoiceSession(ctx context.Context, namespace, sessionID string) (int64, error)
 }
 
 // MessageSearchOpts configures message search behavior.
@@ -316,6 +321,11 @@ type GarbageCollection interface {
 	// DeleteOldConversations removes threads and their messages older than the specified duration.
 	// Returns the number of threads deleted.
 	DeleteOldConversations(ctx context.Context, olderThan time.Duration) (int64, error)
+
+	// DeleteOldVoiceTranscripts removes voice transcript messages (carrying voice.session_id)
+	// older than the specified duration, along with their embeddings and any threads left empty.
+	// Returns the number of messages deleted.
+	DeleteOldVoiceTranscripts(ctx context.Context, olderThan time.Duration) (int64, error)
 
 	// PruneStaleEntities removes entities that haven't been mentioned recently
 	// and have fewer mentions than the threshold.

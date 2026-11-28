@@ -142,3 +142,62 @@ func NewConversationSummarize(r *conversation.SummarizeResult) ConversationSumma
 		ThreadID:           r.ThreadID,
 	}
 }
+
+// VoiceTranscriptAppend is the voice_transcript_append response.
+type VoiceTranscriptAppend struct {
+	Contract
+	Message
+}
+
+// NewVoiceTranscriptAppend maps an engine voice transcript append result.
+func NewVoiceTranscriptAppend(m *types.Message) VoiceTranscriptAppend {
+	if m == nil {
+		return VoiceTranscriptAppend{Contract: Contract{SchemaVersion}}
+	}
+	return VoiceTranscriptAppend{Contract{SchemaVersion}, *newMessage(m)}
+}
+
+// VoiceHistory is the voice_history response.
+type VoiceHistory struct {
+	Contract
+	Messages   []Message `json:"messages"`
+	Summary    string    `json:"summary,omitempty"`
+	NextCursor string    `json:"next_cursor,omitempty"`
+	ThreadID   string    `json:"thread_id"`
+	SessionID  string    `json:"session_id,omitempty"`
+}
+
+// NewVoiceHistory maps an engine voice history result.
+func NewVoiceHistory(r *conversation.VoiceHistoryResult) VoiceHistory {
+	if r == nil {
+		return VoiceHistory{Contract: Contract{SchemaVersion}, Messages: []Message{}}
+	}
+	out := VoiceHistory{
+		Contract:   Contract{SchemaVersion},
+		Messages:   make([]Message, 0, len(r.Messages)),
+		Summary:    r.Summary,
+		NextCursor: r.NextCursor,
+		ThreadID:   r.ThreadID,
+		SessionID:  r.SessionID,
+	}
+	for _, m := range r.Messages {
+		out.Messages = append(out.Messages, *newMessage(m))
+	}
+	return out
+}
+
+// VoiceSessionDelete is the voice_session_delete response.
+type VoiceSessionDelete struct {
+	Contract
+	SessionID    string `json:"session_id"`
+	DeletedCount int64  `json:"deleted_count"`
+}
+
+// NewVoiceSessionDelete maps a voice session deletion result.
+func NewVoiceSessionDelete(sessionID string, deletedCount int64) VoiceSessionDelete {
+	return VoiceSessionDelete{
+		Contract:     Contract{SchemaVersion},
+		SessionID:    sessionID,
+		DeletedCount: deletedCount,
+	}
+}

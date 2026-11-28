@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // TestEntityExtractionSchemaObjectRoot verifies the schema uses an object

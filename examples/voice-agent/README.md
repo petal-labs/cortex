@@ -2,7 +2,7 @@
 
 This example demonstrates a complete conversational voice agent loop connecting
 **Iris v2** (`github.com/petal-labs/iris/v2/voice`) with **Cortex Voice Memory**
-(`github.com/petal-labs/cortex/pkg/cortex`):
+(`github.com/petal-labs/cortex/v2/pkg/cortex`):
 
 1. **Opt-in transcript storage** (`cortex.WithVoiceTranscriptStorage(true)`) with
    a configured retention window (`cortex.WithVoiceTranscriptRetention(30)`) and

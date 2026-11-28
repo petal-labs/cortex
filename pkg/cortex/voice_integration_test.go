@@ -14,9 +14,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/petal-labs/cortex/internal/observability"
-	"github.com/petal-labs/cortex/pkg/cortex"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/observability"
+	"github.com/petal-labs/cortex/v2/pkg/cortex"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // --- Deterministic Iris v2 voice test doubles ---

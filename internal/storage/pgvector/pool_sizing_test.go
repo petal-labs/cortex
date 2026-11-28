@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/petal-labs/cortex/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/config"
 )
 
 // parsePoolConfig parses a database URL into a pgxpool config without

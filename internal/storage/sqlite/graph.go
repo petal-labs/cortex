@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // SearchRelationshipsFTS performs Variant B FTS5 BM25 search across

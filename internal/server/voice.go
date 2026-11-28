@@ -7,9 +7,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/internal/server/dto"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/internal/server/dto"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // registerVoiceTools registers voice conversation memory MCP tools.

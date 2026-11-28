@@ -10,11 +10,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	ctxengine "github.com/petal-labs/cortex/internal/context"
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/internal/entity"
-	"github.com/petal-labs/cortex/internal/knowledge"
-	"github.com/petal-labs/cortex/internal/storage"
+	ctxengine "github.com/petal-labs/cortex/v2/internal/context"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/internal/entity"
+	"github.com/petal-labs/cortex/v2/internal/knowledge"
+	"github.com/petal-labs/cortex/v2/internal/storage"
 )
 
 // View represents different views in the TUI

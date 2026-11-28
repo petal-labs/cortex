@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // CreateCollection creates a new collection.

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/petal-labs/cortex/internal/entity"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/entity"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // EntityClient provides typed access to Cortex Entity Memory.

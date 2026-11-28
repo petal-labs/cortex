@@ -7,10 +7,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/internal/storage/sqlite"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/storage/sqlite"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func TestRunSQLiteExportFilePermissions(t *testing.T) {

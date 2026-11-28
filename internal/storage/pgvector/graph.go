@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // SearchRelationshipsFTS performs full-text search across relational triples

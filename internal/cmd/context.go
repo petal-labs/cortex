@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	ctxengine "github.com/petal-labs/cortex/internal/context"
+	ctxengine "github.com/petal-labs/cortex/v2/internal/context"
 )
 
 var contextCmd = &cobra.Command{

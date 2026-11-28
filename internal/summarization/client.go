@@ -8,9 +8,9 @@ import (
 
 	"github.com/petal-labs/iris/v2/core"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/llm"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/llm"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // SystemPrompt is the default prompt for conversation summarization.

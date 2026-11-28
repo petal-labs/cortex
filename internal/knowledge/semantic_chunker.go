@@ -5,8 +5,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/embedding"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // DefaultSimilarityThreshold is the cosine similarity threshold for detecting breakpoints.

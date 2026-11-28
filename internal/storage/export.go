@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // ExportData represents all data for a namespace that can be exported/imported.

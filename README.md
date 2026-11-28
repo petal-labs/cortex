@@ -715,7 +715,7 @@ go build -tags sqlite_fts5 -o cortex ./cmd/cortex
 
 ## Go SDK (`pkg/cortex`)
 
-External Go applications and PetalFlow agents can embed Cortex directly without importing `internal/` packages using [`github.com/petal-labs/cortex/pkg/cortex`](./pkg/cortex/) and [`pkg/types`](./pkg/types/):
+External Go applications and PetalFlow agents can embed Cortex directly without importing `internal/` packages using [`github.com/petal-labs/cortex/v2/pkg/cortex`](./pkg/cortex/) and [`pkg/types`](./pkg/types/):
 
 ```go
 client, err := cortex.Open(ctx,

@@ -11,8 +11,8 @@ import (
 
 	"github.com/petal-labs/iris/v2/core"
 
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // DefaultSummaryPrefix is prepended to a thread's rolling summary when injected

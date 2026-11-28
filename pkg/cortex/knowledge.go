@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/petal-labs/cortex/internal/knowledge"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/knowledge"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // KnowledgeClient provides typed access to the Cortex Knowledge Store.

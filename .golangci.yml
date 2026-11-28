@@ -100,4 +100,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/petal-labs/cortex
+        - github.com/petal-labs/cortex/v2

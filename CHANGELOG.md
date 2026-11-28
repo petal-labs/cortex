@@ -5,15 +5,24 @@ All notable changes to Cortex will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-11-27
 
 Adds zero-LLM-at-query-time Vector-Graph RAG (HippoRAG-style bipartite
-Personalized PageRank over Cortex's entity/relationship graph), upgrades the
-MCP response contract to `schema_version: 2`, and splits SQLite WAL reads and
-writes for concurrent query throughput.
+Personalized PageRank over Cortex's entity/relationship graph), introduces the
+public Go SDK (`github.com/petal-labs/cortex/v2/pkg/cortex`), upgrades Iris to
+`v2.0.0` with opt-in voice conversation memory (`#76`–`#80`), upgrades the MCP
+response contract to `schema_version: 2`, migrates the Go module path to
+`github.com/petal-labs/cortex/v2`, and hardens storage, concurrency, and MCP
+security across SQLite and pgvector.
 
 ### Upgrading from 1.x
 
+- **Go module path (`github.com/petal-labs/cortex/v2`).** Following Go semantic
+  import versioning for major release `v2`, the Go module path is now
+  `github.com/petal-labs/cortex/v2` (Go `1.25.0+`). Update Go imports to
+  `github.com/petal-labs/cortex/v2/pkg/cortex` and
+  `github.com/petal-labs/cortex/v2/pkg/types`, and install with
+  `go get github.com/petal-labs/cortex/v2`.
 - **MCP response contract (`schema_version: 2`).** Every MCP tool response now
   stamps `"schema_version": 2`. `knowledge_collections` responses include
   `"graph_enabled": false|true`, and `knowledge_search` accepts
@@ -35,7 +44,9 @@ writes for concurrent query throughput.
 
 ### Added
 
-- **Vector-Graph RAG (`internal/graphrag/`)**
+- **Public Go SDK (`pkg/cortex/`)** (#103)
+  - Programmatic facade (`cortex.Open`, `Client.Conversation()`, `Client.Knowledge()`, `Client.Context()`, `Client.Entity()`, `Client.Voice()`) enabling Go applications and PetalFlow agents to embed Cortex without importing `internal/` packages.
+- **Vector-Graph RAG (`internal/graphrag/`)** (#96)
   - Zero-LLM-at-query-time multi-hop retrieval (`search_mode: "graph"`)
     combining hybrid chunk seeding, FTS relationship seeding
     (`relationships_fts` on SQLite / `search_tsvector` GIN on PostgreSQL),
@@ -47,31 +58,31 @@ writes for concurrent query throughput.
   - Deterministic offline multi-hop evaluation harness
     (`internal/graphrag/eval_test.go`) and 25K-chunk SQLite benchmark
     (`CORTEX_RUN_25K_BENCH=1`).
-- **Opt-in Collection Graph Extraction**
+- **Opt-in Collection Graph Extraction** (#96)
   - `collections.graph_enabled` column (default `false`) across SQLite and
     pgvector backends, exposed via `pkg/types.Collection`, MCP
     `knowledge_collections`, and `cortex knowledge create-collection --graph-enabled`.
   - Knowledge ingestion gates chunk entity-extraction enqueueing on
     `collection.GraphEnabled`.
-- **Entity Extraction & Resolution Upgrades**
+- **Entity Extraction & Resolution Upgrades** (#96)
   - Single-call entity + summary + typed relationship extraction in
     `internal/entity/extractor.go` (replaces `O(n^2)` co-occurrence cliques).
   - Bounded top-3 cosine `synonym_of` edge linking (`>= 0.85`) and prefix-based
     candidate resolution (`FindEntityCandidatesByPrefix`, lifting the previous
     1,000-entity resolution cap).
-- **Storage & Concurrency**
+- **Storage & Concurrency** (#96)
   - SQLite WAL read/write pool split (`writeDB` serialized `MaxOpenConns(1)` +
     `readDB` read-only `MaxOpenConns(4)` with `_query_only=1`) so graph
     queries and reads run concurrently with background extraction writes.
   - Shared `GraphStorage` contract and dual-backend conformance suite
     (`internal/storage/conformance/graph.go`).
-- **Observability**
+- **Observability** (#96)
   - Prometheus metrics: `cortex_graph_ppr_duration_seconds`,
     `cortex_graph_subgraph_nodes`, and `cortex_graph_subgraph_edges`.
-- **CLI**
+- **CLI** (#96)
   - `cortex knowledge search --mode graph [--graph-context] [--max-hops 1|2]`.
   - `cortex knowledge create-collection --graph-enabled`.
-- **Voice Conversation Memory & Iris v2.0.0 Integration (#76–#80)**
+- **Voice Conversation Memory & Iris v2.0.0 Integration (#76–#80)** (#104)
   - Upgraded Iris SDK dependency to `github.com/petal-labs/iris/v2 v2.0.0` (Go `1.25.0`), enabling Gemini embedding support alongside Iris voice APIs.
   - Added canonical voice session/turn correlation metadata (`pkg/types/voice.go`) stored backwards-compatibly in `Message.Metadata` (`voice.session_id`, `voice.turn_id`, `voice.speaker_role`, `voice.speaker_id`, `voice.source`, `voice.provider`, `voice.model`, `voice.language`, `voice.timestamp`, `voice.duration_ms`, `voice.sequence`, `voice.is_final`).
   - Added `client.Voice()` Go SDK (`pkg/cortex/voice.go`) with committed-only ingestion (`AppendTranscript`, `RecordVoiceEvent`, `RecordTranscription`, `VoiceSessionRecorder`), namespace-scoped voice history with lossless pagination & summary integration (`History`, `IrisMessages`, `NewIrisMemory`), and explicit privacy/retention controls (`WithVoiceTranscriptStorage`, `WithVoiceTranscriptRetention`, `WithAllowedNamespaces`, `DeleteSession`, `PurgeExpired`).
@@ -80,11 +91,27 @@ writes for concurrent query throughput.
 
 ### Changed
 
+- **BREAKING (Go Module Path v2)** — Migrated Go module path from
+  `github.com/petal-labs/cortex` to `github.com/petal-labs/cortex/v2` and
+  updated minimum Go version to `1.25.0`.
 - **BREAKING (MCP Wire Contract)** — Bumped `dto.SchemaVersion` from `1` to
   `2`; added `graph_enabled` to `Collection` DTOs and optional `graph_context`
   to `KnowledgeSearch` DTOs.
 - **Build & CI** — Added `-tags sqlite_fts5` to `Makefile`, CI, and release
   workflows so SQLite FTS5 search is enabled in all standard builds and tests.
+
+### Fixed
+
+- **Storage GC** — Prune stale SQLite entities using Unix integer timestamps (#95).
+- **Conversation Summarization** — Prevent auto-summarization loops and same-second cutoff hazards (#97).
+- **Entity Isolation & Schema** — Harden entity merge, enforce namespace scoping, and fix strict extraction JSON schema (#98).
+- **MCP Server Security** — Enforce `namespace.allowed_namespaces` and harden SSE/metrics HTTP listeners with loopback Origin/Host checks and timeouts (#99).
+- **SQLite Export** — Handle NULL columns safely, use read-only transactions, preserve entity embeddings, and set `0600` file permissions (#100).
+- **Context Concurrency & TTL** — Fix `Merge` CAS/TTL bugs, add pgvector `FOR UPDATE` locking, and enforce TTL read-expiry (#101).
+
+### Removed
+
+- Removed unwired web dashboard package (#102).
 
 ## [1.1.1] - 2026-08-17
 
@@ -481,6 +508,7 @@ Initial release of Cortex - a memory and knowledge service for AI agents.
 - macOS (amd64, arm64)
 - Windows (amd64)
 
+[2.0.0]: https://github.com/petal-labs/cortex/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/petal-labs/cortex/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/petal-labs/cortex/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/petal-labs/cortex/compare/v1.0.0...v1.0.1

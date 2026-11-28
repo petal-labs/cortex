@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func testContext(ctx context.Context, t *testing.T, b storage.Backend) {

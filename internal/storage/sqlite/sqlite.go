@@ -14,8 +14,8 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/storage"
 )
 
 func init() {

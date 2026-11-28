@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // RelationshipMode selects how relational triples are seeded at query time.

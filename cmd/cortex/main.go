@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/petal-labs/cortex/internal/cmd"
+	"github.com/petal-labs/cortex/v2/internal/cmd"
 )
 
 // Build information, injected at link time by the release workflow and the

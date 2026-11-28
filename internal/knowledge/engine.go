@@ -10,12 +10,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/internal/graphrag"
-	"github.com/petal-labs/cortex/internal/observability"
-	"github.com/petal-labs/cortex/internal/storage"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/internal/embedding"
+	"github.com/petal-labs/cortex/v2/internal/graphrag"
+	"github.com/petal-labs/cortex/v2/internal/observability"
+	"github.com/petal-labs/cortex/v2/internal/storage"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // Common errors returned by the knowledge engine.

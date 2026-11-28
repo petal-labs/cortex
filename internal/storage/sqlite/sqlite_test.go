@@ -8,8 +8,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/petal-labs/cortex/internal/config"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/config"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 func TestWALReadWritePoolSplit(t *testing.T) {

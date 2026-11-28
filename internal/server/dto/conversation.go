@@ -3,8 +3,8 @@ package dto
 import (
 	"time"
 
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 // Message mirrors the wire shape of types.Message.

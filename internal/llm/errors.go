@@ -7,7 +7,7 @@ import (
 	"github.com/petal-labs/iris/v2/core"
 	"go.uber.org/zap"
 
-	"github.com/petal-labs/cortex/internal/observability"
+	"github.com/petal-labs/cortex/v2/internal/observability"
 )
 
 // ErrorKind classifies a provider failure by the operational response it

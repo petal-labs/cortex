@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/petal-labs/cortex/internal/storage"
+	"github.com/petal-labs/cortex/v2/internal/storage"
 )
 
 func testLifecycle(ctx context.Context, t *testing.T, b storage.Backend) {

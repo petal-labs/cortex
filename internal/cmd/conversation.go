@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/petal-labs/cortex/internal/conversation"
-	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/internal/summarization"
+	"github.com/petal-labs/cortex/v2/internal/conversation"
+	"github.com/petal-labs/cortex/v2/internal/embedding"
+	"github.com/petal-labs/cortex/v2/internal/summarization"
 )
 
 var conversationCmd = &cobra.Command{

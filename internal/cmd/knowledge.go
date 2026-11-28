@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/petal-labs/cortex/internal/embedding"
-	"github.com/petal-labs/cortex/internal/knowledge"
-	"github.com/petal-labs/cortex/pkg/types"
+	"github.com/petal-labs/cortex/v2/internal/embedding"
+	"github.com/petal-labs/cortex/v2/internal/knowledge"
+	"github.com/petal-labs/cortex/v2/pkg/types"
 )
 
 var knowledgeCmd = &cobra.Command{

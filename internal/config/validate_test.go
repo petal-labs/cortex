@@ -157,6 +157,16 @@ func TestValidate(t *testing.T) {
 			mutate:     func(c *Config) { c.Server.ShutdownTimeout = -time.Second },
 			wantSubstr: "server.shutdown_timeout must be >= 0",
 		},
+		{
+			name:       "negative voice transcript retention days",
+			mutate:     func(c *Config) { c.Voice.TranscriptRetentionDays = -1 },
+			wantSubstr: "voice.transcript_retention_days must be >= 0",
+		},
+		{
+			name:       "valid voice opt-in and retention",
+			mutate:     func(c *Config) { c.Voice.TranscriptStorageEnabled = true; c.Voice.TranscriptRetentionDays = 30 },
+			wantSubstr: "",
+		},
 	}
 
 	for _, tc := range cases {

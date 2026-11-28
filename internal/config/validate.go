@@ -237,6 +237,13 @@ func (c *Config) Validate() error {
 			"retention.gc_interval must be > 0 (got %s)", c.Retention.GCInterval))
 	}
 
+	// Voice
+	if c.Voice.TranscriptRetentionDays < 0 {
+		problems = append(problems, fmt.Sprintf(
+			"voice.transcript_retention_days must be >= 0, 0 disables voice-specific auto-delete (got %d)",
+			c.Voice.TranscriptRetentionDays))
+	}
+
 	// Namespace
 	for i, ns := range c.Namespace.AllowedNamespaces {
 		if strings.TrimSpace(ns) == "" {

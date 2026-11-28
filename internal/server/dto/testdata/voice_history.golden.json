@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "messages": [
+    {
+      "id": "vmsg-1",
+      "namespace": "ns",
+      "thread_id": "voice-thread-1",
+      "role": "user",
+      "content": "hello from voice",
+      "metadata": {
+        "voice.is_final": "true",
+        "voice.session_id": "sess-1",
+        "voice.source": "stt",
+        "voice.speaker_role": "user",
+        "voice.turn_id": "turn-1"
+      },
+      "created_at": "2026-01-02T03:04:05Z"
+    }
+  ],
+  "summary": "voice summary",
+  "thread_id": "voice-thread-1",
+  "session_id": "sess-1"
+}

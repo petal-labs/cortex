@@ -60,6 +60,78 @@ func (b *Backend) DeleteOldConversations(ctx context.Context, olderThan time.Dur
 	return result.RowsAffected(), nil
 }
 
+// DeleteOldVoiceTranscripts removes voice transcript messages (carrying
+// voice.session_id in metadata) older than olderThan, along with their
+// embeddings and any threads left empty.
+func (b *Backend) DeleteOldVoiceTranscripts(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan)
+
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, namespace, thread_id
+		FROM messages
+		WHERE metadata IS NOT NULL
+		  AND metadata ? 'voice.session_id'
+		  AND created_at < $1
+	`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+
+	type threadKey struct {
+		namespace string
+		threadID  string
+	}
+	var msgIDs []string
+	threads := make(map[threadKey]struct{})
+	for rows.Next() {
+		var id, ns, tid string
+		if err := rows.Scan(&id, &ns, &tid); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		msgIDs = append(msgIDs, id)
+		threads[threadKey{namespace: ns, threadID: tid}] = struct{}{}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(msgIDs) == 0 {
+		return 0, nil
+	}
+
+	if _, err := tx.Exec(ctx, "DELETE FROM message_embeddings WHERE message_id = ANY($1)", msgIDs); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(ctx, "DELETE FROM messages WHERE id = ANY($1)", msgIDs)
+	if err != nil {
+		return 0, err
+	}
+
+	for tk := range threads {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM threads
+			WHERE namespace = $1 AND id = $2
+			  AND NOT EXISTS (
+			      SELECT 1 FROM messages WHERE namespace = $1 AND thread_id = $2
+			  )
+		`, tk.namespace, tk.threadID); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return res.RowsAffected(), nil
+}
+
 // PruneStaleEntities removes entities that haven't been mentioned recently
 // and have fewer mentions than the threshold.
 // Returns the number of entities deleted.

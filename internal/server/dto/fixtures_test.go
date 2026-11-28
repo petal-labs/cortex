@@ -44,6 +44,32 @@ var summarizeInput = &conversation.SummarizeResult{
 	ThreadID:           "thread-1",
 }
 
+var voiceMessageFixture = types.Message{
+	ID:        "vmsg-1",
+	Namespace: "ns",
+	ThreadID:  "voice-thread-1",
+	Role:      "user",
+	Content:   "hello from voice",
+	Metadata: map[string]string{
+		types.VoiceMetaSessionID:   "sess-1",
+		types.VoiceMetaTurnID:      "turn-1",
+		types.VoiceMetaSpeakerRole: "user",
+		types.VoiceMetaSource:      types.VoiceSourceSTT,
+		types.VoiceMetaFinal:       "true",
+	},
+	CreatedAt: ts1,
+}
+
+var voiceHistoryInput = &conversation.VoiceHistoryResult{
+	Messages: []*types.Message{
+		&voiceMessageFixture,
+	},
+	Summary:    "voice summary",
+	NextCursor: "",
+	ThreadID:   "voice-thread-1",
+	SessionID:  "sess-1",
+}
+
 var ingestInput = &knowledge.IngestResult{
 	DocumentID:    "doc-1",
 	ChunksCreated: 3,

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/petal-labs/iris/core"
+	"github.com/petal-labs/iris/v2/core"
 	"go.uber.org/zap"
 
 	"github.com/petal-labs/cortex/internal/observability"

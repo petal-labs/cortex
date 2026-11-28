@@ -154,4 +154,47 @@ func testGarbageCollection(ctx context.Context, t *testing.T, b storage.Backend,
 			t.Errorf("expected >= 0, got %d", deleted)
 		}
 	})
+
+	t.Run("DeleteOldVoiceTranscripts", func(t *testing.T) {
+		oldTime := time.Now().UTC().Add(-48 * time.Hour)
+		freshTime := time.Now().UTC()
+
+		for _, m := range []*types.Message{
+			{
+				Namespace: ns, ThreadID: "gc-voice-old", Role: "user", Content: "old voice",
+				Metadata:  map[string]string{types.VoiceMetaSessionID: "sess-old", types.VoiceMetaFinal: "true"},
+				CreatedAt: oldTime,
+			},
+			{
+				Namespace: ns, ThreadID: "gc-voice-fresh", Role: "user", Content: "fresh voice",
+				Metadata:  map[string]string{types.VoiceMetaSessionID: "sess-fresh", types.VoiceMetaFinal: "true"},
+				CreatedAt: freshTime,
+			},
+			{
+				Namespace: ns, ThreadID: "gc-non-voice-old", Role: "user", Content: "old text",
+				CreatedAt: oldTime,
+			},
+		} {
+			if err := b.AppendMessage(ctx, m); err != nil {
+				t.Fatalf("AppendMessage: %v", err)
+			}
+		}
+
+		deleted, err := b.DeleteOldVoiceTranscripts(ctx, 24*time.Hour)
+		if err != nil {
+			t.Fatalf("DeleteOldVoiceTranscripts: %v", err)
+		}
+		if deleted < 1 {
+			t.Errorf("expected at least 1 expired voice transcript deleted, got %d", deleted)
+		}
+		if _, err := b.GetThread(ctx, ns, "gc-voice-old"); err != storage.ErrNotFound {
+			t.Errorf("expected old voice thread removed, got %v", err)
+		}
+		if _, err := b.GetThread(ctx, ns, "gc-voice-fresh"); err != nil {
+			t.Errorf("expected fresh voice thread retained, got %v", err)
+		}
+		if _, err := b.GetThread(ctx, ns, "gc-non-voice-old"); err != nil {
+			t.Errorf("expected old non-voice thread retained by voice GC, got %v", err)
+		}
+	})
 }

@@ -60,9 +60,17 @@ type Engine struct {
 	summarizer         Summarizer
 	extractionEnqueuer ExtractionEnqueuer
 	cfg                *config.ConversationConfig
+	voiceCfg           *config.VoiceConfig
+
+	nsMu                 sync.RWMutex
+	allowedNamespaces    map[string]struct{}
+	allowedNamespaceList []string
 
 	summarizeMu    sync.Mutex
 	summarizeLocks map[threadLockKey]*threadLock
+
+	voiceAppendMu    sync.Mutex
+	voiceAppendLocks map[threadLockKey]*threadLock
 }
 
 // NewEngine creates a new conversation engine.
@@ -73,16 +81,19 @@ func NewEngine(store storage.Backend, emb embedding.Provider, cfg *config.Conver
 		return nil, errors.New("storage backend is required")
 	}
 
+	defaultCfg := config.DefaultConfig()
 	if cfg == nil {
-		defaultCfg := config.DefaultConfig()
 		cfg = &defaultCfg.Conversation
 	}
+	voiceCfg := defaultCfg.Voice
 
 	return &Engine{
-		storage:        store,
-		embedding:      emb,
-		cfg:            cfg,
-		summarizeLocks: make(map[threadLockKey]*threadLock),
+		storage:          store,
+		embedding:        emb,
+		cfg:              cfg,
+		voiceCfg:         &voiceCfg,
+		summarizeLocks:   make(map[threadLockKey]*threadLock),
+		voiceAppendLocks: make(map[threadLockKey]*threadLock),
 	}, nil
 }
 

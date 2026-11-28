@@ -27,11 +27,6 @@ func TestValidateProviders(t *testing.T) {
 			wantSubstr: `summarization.provider "mistral" is not supported`,
 		},
 		{
-			name:       "gemini cannot embed",
-			mutate:     func(c *Config) { c.Embedding.Provider = "gemini" },
-			wantSubstr: `embedding.provider "gemini" does not support embeddings`,
-		},
-		{
 			name:       "anthropic cannot embed",
 			mutate:     func(c *Config) { c.Embedding.Provider = "anthropic" },
 			wantSubstr: `embedding.provider "anthropic" does not support embeddings`,
@@ -69,16 +64,16 @@ func TestValidateProviders(t *testing.T) {
 // TestValidateProviderErrorListsAlternatives checks the message tells the
 // reader what to use instead, matching the style of the other validators.
 func TestValidateProviderErrorListsAlternatives(t *testing.T) {
-	err := mutate(t, func(c *Config) { c.Embedding.Provider = "gemini" }).Validate()
+	err := mutate(t, func(c *Config) { c.Embedding.Provider = "anthropic" }).Validate()
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, want := range []string{"openai", "voyageai", "ollama"} {
+	for _, want := range []string{"gemini", "openai", "voyageai", "ollama"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected the embedding alternatives to mention %q, got:\n%v", want, err)
 		}
 	}
-	if strings.Contains(err.Error(), "anthropic") {
+	if strings.Contains(err.Error(), "(supported: anthropic") {
 		t.Errorf("embedding alternatives must not list a provider that cannot embed, got:\n%v", err)
 	}
 }
@@ -86,7 +81,7 @@ func TestValidateProviderErrorListsAlternatives(t *testing.T) {
 // TestValidateAcceptsEveryCapableProvider locks each documented pairing so a
 // valid combination is never rejected.
 func TestValidateAcceptsEveryCapableProvider(t *testing.T) {
-	for _, p := range []string{"openai", "voyageai", "ollama"} {
+	for _, p := range []string{"gemini", "openai", "voyageai", "ollama"} {
 		if err := mutate(t, func(c *Config) { c.Embedding.Provider = p }).Validate(); err != nil {
 			t.Errorf("embedding.provider %q should be valid, got: %v", p, err)
 		}
@@ -102,7 +97,7 @@ func TestValidateAcceptsEveryCapableProvider(t *testing.T) {
 // join the aggregated report rather than short-circuiting it.
 func TestValidateProvidersReportedWithOtherProblems(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Embedding.Provider = "gemini"
+	cfg.Embedding.Provider = "anthropic"
 	cfg.Summarization.Provider = "voyageai"
 	cfg.Server.LogLevel = "loud"
 
@@ -111,7 +106,7 @@ func TestValidateProvidersReportedWithOtherProblems(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	for _, want := range []string{
-		`embedding.provider "gemini"`,
+		`embedding.provider "anthropic"`,
 		`summarization.provider "voyageai"`,
 		`server.log_level "loud"`,
 	} {

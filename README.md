@@ -742,6 +742,8 @@ _, err = client.Entity().Create(ctx, "my-app", "Cortex", types.EntityTypeProduct
 
 See [examples/go-client/main.go](./examples/go-client/main.go) for a complete runnable example (`go run -tags sqlite_fts5 ./examples/go-client`).
 
+For real-time voice agents backed by Iris v2 (`github.com/petal-labs/iris/v2 v2.0.0`), `client.Voice()` provides opt-in committed transcript persistence, session/turn correlation metadata, namespace-scoped history retrieval for Iris context injection, and retention/deletion controls. See [docs/voice-memory.md](./docs/voice-memory.md) and [examples/voice-agent/main.go](./examples/voice-agent/main.go) (`go run -tags sqlite_fts5 ./examples/voice-agent`).
+
 ## Versioning
 
 Cortex follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

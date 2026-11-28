@@ -80,6 +80,24 @@ func (b *Backend) AppendMessage(ctx context.Context, msg *types.Message) error {
 	})
 }
 
+// parseSQLiteMessageCursor parses either a composite "<unix>:<rowid>" cursor
+// or a legacy "<unix>" cursor.
+func parseSQLiteMessageCursor(cursor string) (int64, int64, bool) {
+	if idx := strings.IndexByte(cursor, ':'); idx > 0 {
+		var ts, rowid int64
+		if _, err := fmt.Sscanf(cursor[:idx], "%d", &ts); err == nil {
+			if _, err := fmt.Sscanf(cursor[idx+1:], "%d", &rowid); err == nil {
+				return ts, rowid, true
+			}
+		}
+	}
+	var ts int64
+	if _, err := fmt.Sscanf(cursor, "%d", &ts); err == nil {
+		return ts, 0, false
+	}
+	return 0, 0, false
+}
+
 // GetMessages retrieves messages from a thread, ordered by creation time.
 func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error) {
 	if limit <= 0 {
@@ -88,16 +106,22 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 
 	var args []any
 	query := `
-		SELECT id, namespace, thread_id, role, content, metadata, summarized, created_at
+		SELECT rowid, id, namespace, thread_id, role, content, metadata, summarized, created_at
 		FROM messages
 		WHERE namespace = ? AND thread_id = ?
 	`
 	args = append(args, namespace, threadID)
 
-	// Handle cursor-based pagination (cursor is the created_at timestamp)
+	// Handle cursor-based pagination (supports composite "<unix>:<rowid>" and legacy "<unix>")
 	if cursor != "" {
-		query += " AND created_at < ?"
-		args = append(args, cursor)
+		ts, rowid, composite := parseSQLiteMessageCursor(cursor)
+		if composite {
+			query += " AND (created_at < ? OR (created_at = ? AND rowid < ?))"
+			args = append(args, ts, ts, rowid)
+		} else {
+			query += " AND created_at < ?"
+			args = append(args, cursor)
+		}
 	}
 
 	query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
@@ -109,13 +133,18 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 	}
 	defer rows.Close()
 
-	var messages []*types.Message
+	type scannedMsg struct {
+		rowid int64
+		msg   *types.Message
+	}
+	var scanned []scannedMsg
 	for rows.Next() {
 		msg := &types.Message{}
+		var rowid int64
 		var metadataJSON sql.NullString
 		var createdAtUnix int64
 
-		if err := rows.Scan(&msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content, &metadataJSON, &msg.Summarized, &createdAtUnix); err != nil {
+		if err := rows.Scan(&rowid, &msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content, &metadataJSON, &msg.Summarized, &createdAtUnix); err != nil {
 			return nil, "", fmt.Errorf("failed to scan message: %w", err)
 		}
 
@@ -127,7 +156,7 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 			}
 		}
 
-		messages = append(messages, msg)
+		scanned = append(scanned, scannedMsg{rowid: rowid, msg: msg})
 	}
 
 	if err := rows.Err(); err != nil {
@@ -136,17 +165,18 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 
 	// Determine next cursor
 	var nextCursor string
-	if len(messages) > limit {
-		// There are more messages, use the last message's timestamp as cursor
-		messages = messages[:limit]
-		if len(messages) > 0 {
-			nextCursor = fmt.Sprintf("%d", messages[len(messages)-1].CreatedAt.Unix())
+	if len(scanned) > limit {
+		scanned = scanned[:limit]
+		if len(scanned) > 0 {
+			oldest := scanned[len(scanned)-1]
+			nextCursor = fmt.Sprintf("%d:%d", oldest.msg.CreatedAt.Unix(), oldest.rowid)
 		}
 	}
 
 	// Reverse to get chronological order (oldest first)
-	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-		messages[i], messages[j] = messages[j], messages[i]
+	messages := make([]*types.Message, len(scanned))
+	for i := range scanned {
+		messages[len(scanned)-1-i] = scanned[i].msg
 	}
 
 	return messages, nextCursor, nil
@@ -158,15 +188,21 @@ func (b *Backend) GetMessages(ctx context.Context, namespace, threadID string, l
 func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, threadID string, limit int, cursor string) ([]*types.Message, string, error) {
 	var args []any
 	query := `
-		SELECT id, namespace, thread_id, role, content, metadata, summarized, created_at
+		SELECT rowid, id, namespace, thread_id, role, content, metadata, summarized, created_at
 		FROM messages
 		WHERE namespace = ? AND thread_id = ? AND summarized = 0
 	`
 	args = append(args, namespace, threadID)
 
 	if cursor != "" {
-		query += " AND created_at < ?"
-		args = append(args, cursor)
+		ts, rowid, composite := parseSQLiteMessageCursor(cursor)
+		if composite {
+			query += " AND (created_at < ? OR (created_at = ? AND rowid < ?))"
+			args = append(args, ts, ts, rowid)
+		} else {
+			query += " AND created_at < ?"
+			args = append(args, cursor)
+		}
 	}
 
 	if limit > 0 {
@@ -182,13 +218,18 @@ func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, thread
 	}
 	defer rows.Close()
 
-	var messages []*types.Message
+	type scannedMsg struct {
+		rowid int64
+		msg   *types.Message
+	}
+	var scanned []scannedMsg
 	for rows.Next() {
 		msg := &types.Message{}
+		var rowid int64
 		var metadataJSON sql.NullString
 		var createdAtUnix int64
 
-		if err := rows.Scan(&msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content, &metadataJSON, &msg.Summarized, &createdAtUnix); err != nil {
+		if err := rows.Scan(&rowid, &msg.ID, &msg.Namespace, &msg.ThreadID, &msg.Role, &msg.Content, &metadataJSON, &msg.Summarized, &createdAtUnix); err != nil {
 			return nil, "", fmt.Errorf("failed to scan message: %w", err)
 		}
 
@@ -200,7 +241,7 @@ func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, thread
 			}
 		}
 
-		messages = append(messages, msg)
+		scanned = append(scanned, scannedMsg{rowid: rowid, msg: msg})
 	}
 
 	if err := rows.Err(); err != nil {
@@ -208,16 +249,24 @@ func (b *Backend) GetUnsummarizedMessages(ctx context.Context, namespace, thread
 	}
 
 	var nextCursor string
+	var messages []*types.Message
 	if limit > 0 {
-		if len(messages) > limit {
-			messages = messages[:limit]
-			if len(messages) > 0 {
-				nextCursor = fmt.Sprintf("%d", messages[len(messages)-1].CreatedAt.Unix())
+		if len(scanned) > limit {
+			scanned = scanned[:limit]
+			if len(scanned) > 0 {
+				oldest := scanned[len(scanned)-1]
+				nextCursor = fmt.Sprintf("%d:%d", oldest.msg.CreatedAt.Unix(), oldest.rowid)
 			}
 		}
 		// Reverse to get chronological order (oldest first)
-		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-			messages[i], messages[j] = messages[j], messages[i]
+		messages = make([]*types.Message, len(scanned))
+		for i := range scanned {
+			messages[len(scanned)-1-i] = scanned[i].msg
+		}
+	} else {
+		messages = make([]*types.Message, len(scanned))
+		for i := range scanned {
+			messages[i] = scanned[i].msg
 		}
 	}
 
@@ -528,4 +577,77 @@ func (b *Backend) SearchMessages(ctx context.Context, namespace string, embeddin
 	}
 
 	return results, nil
+}
+
+// DeleteVoiceSession removes all voice transcript messages belonging to
+// sessionID strictly within namespace, along with their embeddings and any
+// threads left empty.
+func (b *Backend) DeleteVoiceSession(ctx context.Context, namespace, sessionID string) (int64, error) {
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(sessionID) == "" {
+		return 0, storage.ErrInvalidInput
+	}
+
+	var deleted int64
+	err := b.withTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT id, thread_id
+			FROM messages
+			WHERE namespace = ?
+			  AND metadata IS NOT NULL
+			  AND json_valid(metadata)
+			  AND json_extract(metadata, '$."voice.session_id"') = ?
+		`, namespace, sessionID)
+		if err != nil {
+			return fmt.Errorf("failed to query voice session messages: %w", err)
+		}
+
+		var msgIDs []string
+		affectedThreads := make(map[string]struct{})
+		for rows.Next() {
+			var id, tid string
+			if err := rows.Scan(&id, &tid); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan voice session message: %w", err)
+			}
+			msgIDs = append(msgIDs, id)
+			affectedThreads[tid] = struct{}{}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate voice session messages: %w", err)
+		}
+		if len(msgIDs) == 0 {
+			return nil
+		}
+
+		for _, id := range msgIDs {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM message_embeddings WHERE message_id = ?", id); err != nil {
+				return fmt.Errorf("failed to delete voice message embedding: %w", err)
+			}
+			res, err := tx.ExecContext(ctx, "DELETE FROM messages WHERE namespace = ? AND id = ?", namespace, id)
+			if err != nil {
+				return fmt.Errorf("failed to delete voice message: %w", err)
+			}
+			n, _ := res.RowsAffected()
+			deleted += n
+		}
+
+		for tid := range affectedThreads {
+			if _, err := tx.ExecContext(ctx, `
+				DELETE FROM threads
+				WHERE namespace = ? AND id = ?
+				  AND NOT EXISTS (
+				      SELECT 1 FROM messages WHERE namespace = ? AND thread_id = ?
+				  )
+			`, namespace, tid, namespace, tid); err != nil {
+				return fmt.Errorf("failed to cleanup empty voice thread: %w", err)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
 }

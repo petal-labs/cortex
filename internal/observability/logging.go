@@ -19,6 +19,8 @@ const (
 	ctxKeyThreadID  contextKey = "thread_id"
 	ctxKeyRunID     contextKey = "run_id"
 	ctxKeyEntityID  contextKey = "entity_id"
+	ctxKeySessionID contextKey = "session_id"
+	ctxKeyTurnID    contextKey = "turn_id"
 )
 
 // Logger wraps zap.Logger with context-aware logging methods.
@@ -112,6 +114,12 @@ func extractContextFields(ctx context.Context) []zap.Field {
 	if entityID, ok := ctx.Value(ctxKeyEntityID).(string); ok && entityID != "" {
 		fields = append(fields, zap.String("entity_id", entityID))
 	}
+	if sessionID, ok := ctx.Value(ctxKeySessionID).(string); ok && sessionID != "" {
+		fields = append(fields, zap.String("session_id", sessionID))
+	}
+	if turnID, ok := ctx.Value(ctxKeyTurnID).(string); ok && turnID != "" {
+		fields = append(fields, zap.String("turn_id", turnID))
+	}
 
 	return fields
 }
@@ -141,6 +149,16 @@ func WithRunID(ctx context.Context, runID string) context.Context {
 // WithEntityID adds an entity ID to the context.
 func WithEntityID(ctx context.Context, entityID string) context.Context {
 	return context.WithValue(ctx, ctxKeyEntityID, entityID)
+}
+
+// WithSessionID adds a voice session ID to the context.
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, ctxKeySessionID, sessionID)
+}
+
+// WithTurnID adds a voice turn ID to the context.
+func WithTurnID(ctx context.Context, turnID string) context.Context {
+	return context.WithValue(ctx, ctxKeyTurnID, turnID)
 }
 
 // Logging helper functions that use the default logger.

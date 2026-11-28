@@ -140,6 +140,7 @@ func (c *Collector) runFullGC() {
 	// Run each GC task
 	results.ExpiredTTL = c.RunTTLCleanup(ctx)
 	results.OldConversations = c.RunConversationCleanup(ctx)
+	results.OldVoiceTranscripts = c.RunVoiceTranscriptCleanup(ctx)
 	results.StaleEntities = c.RunEntityPruning(ctx)
 	results.OrphanedChunks = c.RunOrphanedChunkCleanup(ctx)
 	results.OldContextHistory = c.RunContextHistoryCleanup(ctx)
@@ -149,6 +150,7 @@ func (c *Collector) runFullGC() {
 		zap.Duration("duration", time.Since(start)),
 		zap.Int64("expired_ttl", results.ExpiredTTL),
 		zap.Int64("old_conversations", results.OldConversations),
+		zap.Int64("old_voice_transcripts", results.OldVoiceTranscripts),
 		zap.Int64("stale_entities", results.StaleEntities),
 		zap.Int64("orphaned_chunks", results.OrphanedChunks),
 		zap.Int64("old_context_history", results.OldContextHistory),
@@ -158,12 +160,13 @@ func (c *Collector) runFullGC() {
 
 // GCResults holds the results of a garbage collection run.
 type GCResults struct {
-	ExpiredTTL        int64
-	OldConversations  int64
-	StaleEntities     int64
-	OrphanedChunks    int64
-	OldContextHistory int64
-	OldRunContext     int64
+	ExpiredTTL          int64
+	OldConversations    int64
+	OldVoiceTranscripts int64
+	StaleEntities       int64
+	OrphanedChunks      int64
+	OldContextHistory   int64
+	OldRunContext       int64
 }
 
 // RunTTLCleanup removes context entries past their TTL expiration.
@@ -199,6 +202,28 @@ func (c *Collector) RunConversationCleanup(ctx context.Context) int64 {
 		observability.Info(ctx, "deleted old conversations",
 			zap.Int64("deleted", deleted),
 			zap.Int("retention_days", c.config.Retention.ConversationRetentionDays))
+	}
+	return deleted
+}
+
+// RunVoiceTranscriptCleanup removes persisted voice transcripts older than
+// voice.transcript_retention_days.
+func (c *Collector) RunVoiceTranscriptCleanup(ctx context.Context) int64 {
+	if c.config.Voice.TranscriptRetentionDays <= 0 {
+		return 0 // Voice-specific retention disabled
+	}
+
+	duration := time.Duration(c.config.Voice.TranscriptRetentionDays) * 24 * time.Hour
+	deleted, err := c.store.DeleteOldVoiceTranscripts(ctx, duration)
+	if err != nil {
+		observability.Error(ctx, "failed to delete old voice transcripts",
+			zap.Error(err))
+		return 0
+	}
+	if deleted > 0 {
+		observability.Info(ctx, "deleted old voice transcripts",
+			zap.Int64("deleted", deleted),
+			zap.Int("retention_days", c.config.Voice.TranscriptRetentionDays))
 	}
 	return deleted
 }
@@ -291,6 +316,7 @@ func (c *Collector) RunAll(ctx context.Context) *GCResults {
 
 	results.ExpiredTTL = c.RunTTLCleanup(ctx)
 	results.OldConversations = c.RunConversationCleanup(ctx)
+	results.OldVoiceTranscripts = c.RunVoiceTranscriptCleanup(ctx)
 	results.StaleEntities = c.RunEntityPruning(ctx)
 	results.OrphanedChunks = c.RunOrphanedChunkCleanup(ctx)
 	results.OldContextHistory = c.RunContextHistoryCleanup(ctx)

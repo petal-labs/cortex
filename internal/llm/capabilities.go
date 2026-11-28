@@ -3,7 +3,7 @@ package llm
 import "sort"
 
 // Capabilities describes what a provider can do. Not every provider offers
-// every feature: Anthropic and Gemini expose no embedding API through iris,
+// every feature: Anthropic exposes no embedding API through iris,
 // and VoyageAI is embeddings-only — its Chat returns core.ErrNotSupported.
 type Capabilities struct {
 	Chat       bool
@@ -21,7 +21,7 @@ type Capabilities struct {
 var providerCapabilities = map[ProviderType]Capabilities{
 	ProviderOpenAI:    {Chat: true, Embeddings: true},
 	ProviderAnthropic: {Chat: true, Embeddings: false},
-	ProviderGemini:    {Chat: true, Embeddings: false},
+	ProviderGemini:    {Chat: true, Embeddings: true},
 	ProviderOllama:    {Chat: true, Embeddings: true},
 	ProviderVoyageAI:  {Chat: false, Embeddings: true},
 }

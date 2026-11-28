@@ -9,6 +9,7 @@ This directory contains examples demonstrating how to use Cortex in various scen
 | [cli-basics](./cli-basics/) | Command-line usage patterns for common tasks |
 | [claude-desktop](./claude-desktop/) | Integration with Claude Desktop via MCP |
 | [go-client](./go-client/) | Using Cortex programmatically as a Go library |
+| [voice-agent](./voice-agent/) | Conversational voice agent connecting Iris v2 voice pipeline with Cortex voice memory |
 | [petalflow-research-agent](./petalflow-research-agent/) | Multi-agent research workflow using PetalFlow Agent/Task schema |
 | [petalflow-graph](./petalflow-graph/) | Building workflow graphs programmatically with PetalFlow |
 | [petalflow-agent-tools](./petalflow-agent-tools/) | Using Cortex as a tool provider for PetalFlow agents |

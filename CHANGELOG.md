@@ -71,6 +71,12 @@ writes for concurrent query throughput.
 - **CLI**
   - `cortex knowledge search --mode graph [--graph-context] [--max-hops 1|2]`.
   - `cortex knowledge create-collection --graph-enabled`.
+- **Voice Conversation Memory & Iris v2.0.0 Integration (#76–#80)**
+  - Upgraded Iris SDK dependency to `github.com/petal-labs/iris/v2 v2.0.0` (Go `1.25.0`), enabling Gemini embedding support alongside Iris voice APIs.
+  - Added canonical voice session/turn correlation metadata (`pkg/types/voice.go`) stored backwards-compatibly in `Message.Metadata` (`voice.session_id`, `voice.turn_id`, `voice.speaker_role`, `voice.speaker_id`, `voice.source`, `voice.provider`, `voice.model`, `voice.language`, `voice.timestamp`, `voice.duration_ms`, `voice.sequence`, `voice.is_final`).
+  - Added `client.Voice()` Go SDK (`pkg/cortex/voice.go`) with committed-only ingestion (`AppendTranscript`, `RecordVoiceEvent`, `RecordTranscription`, `VoiceSessionRecorder`), namespace-scoped voice history with lossless pagination & summary integration (`History`, `IrisMessages`, `NewIrisMemory`), and explicit privacy/retention controls (`WithVoiceTranscriptStorage`, `WithVoiceTranscriptRetention`, `WithAllowedNamespaces`, `DeleteSession`, `PurgeExpired`).
+  - Added voice retention GC (`voice.transcript_storage_enabled`, `voice.transcript_retention_days`, `DeleteVoiceSession`, `DeleteOldVoiceTranscripts`) across SQLite and pgvector backends, plus additive MCP tools (`voice_transcript_append`, `voice_history`, `voice_session_delete`).
+  - Added end-to-end mocked voice-memory integration tests (`pkg/cortex/voice_integration_test.go`), runnable voice agent example (`examples/voice-agent`), and documentation (`docs/voice-memory.md`).
 
 ### Changed
 

@@ -117,9 +117,10 @@ func main() {
 			}
 			if evt.Type == core.VoiceEventTurnCompleted {
 				completed++
-				if completed == 1 {
+				switch completed {
+				case 1:
 					close(turn1Done)
-				} else if completed == 2 {
+				case 2:
 					close(turn2Done)
 				}
 			}

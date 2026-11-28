@@ -351,9 +351,10 @@ func TestVoicePipelineEndToEnd_MockSpeechToCortexToIrisContext(t *testing.T) {
 			}
 			if evt.Type == core.VoiceEventTurnCompleted {
 				completedTurns++
-				if completedTurns == 1 {
+				switch completedTurns {
+				case 1:
 					close(turn1Done)
-				} else if completedTurns == 2 {
+				case 2:
 					close(turnsDone)
 				}
 			}
